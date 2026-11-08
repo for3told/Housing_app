@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Активные общедомовые голосования</h2>
+            {% if session['role'] == 'admin' %}
+                <a href="/create_poll" class="btn btn-primary">➕ Создать новое голосование</a>
+            {% endif %}
+        </div>
+        
+        {% if polls %}
+            <div class="row">
+                {% for poll in polls %}
+                <div class="col-md-6 mb-4">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title text-primary">{{ poll['title'] }}</h5>
+                            <p class="card-text text-muted">{{ poll['description'] }}</p>
+                            <hr>
+                            <a href="/vote/{{ poll['id'] }}" class="btn btn-outline-success btn-sm">Перейти к голосованию</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="alert alert-warning">Активных голосований пока нет.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

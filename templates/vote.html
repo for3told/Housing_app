@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h3 class="card-title text-primary mb-3">{{ poll['title'] }}</h3>
+                <p class="card-text text-muted mb-4">{{ poll['description'] }}</p>
+                <hr>
+
+                {% if error %}
+                    <div class="alert alert-danger" role="alert">{{ error }}</div>
+                {% endif %}
+
+                {% if has_voted %}
+                    <!-- Если жилец уже голосовал, показываем сообщение и результаты -->
+                    <div class="alert alert-success" role="alert">
+                        ✅ Вы уже приняли участие в этом голосовании. Спасибо за вашу гражданскую позицию!
+                    </div>
+
+                    <h5 class="mt-4 mb-3">Текущие результаты голосования:</h5>
+                    <ul class="list-group mb-4">
+                        {% for option in options %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ option['option_text'] }}
+                                <span class="badge bg-primary rounded-pill">{{ option['vote_count'] }} голосов</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <!-- Если еще не голосовал, показываем форму выбора -->
+                    <form method="POST">
+                        <h5 class="mb-3">Выберите вариант ответа:</h5>
+                        {% for option in options %}
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="option_id" id="opt_{{ option['id'] }}" value="{{ option['id'] }}" required>
+                                <label class="form-check-label" for="opt_{{ option['id'] }}">
+                                    {{ option['option_text'] }}
+                                </label>
+                            </div>
+                        {% endfor %}
+                        
+                        <div class="d-flex justify-content-between mt-4">
+                            <a href="/" class="btn btn-secondary">Назад к списку</a>
+                            <button type="submit" class="btn btn-success">Проголосовать</button>
+                        </div>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
