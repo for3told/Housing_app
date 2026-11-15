@@ -45,7 +45,12 @@
 
                     <div class="mb-3">
                         <label class="form-label">Пароль:</label>
-                        <input type="password" name="password" id="passwordInput" class="form-control" required>
+                        <div class="input-group">
+                            <input type="password" name="password" id="passwordInput" class="form-control" required>
+                            <button class="btn btn-outline-secondary" type="button" id="togglePasswordRegister">
+                                👁️
+                            </button>
+                        </div>
                         <!-- Индикатор сложности пароля -->
                         <div class="form-text mt-1" id="passwordHelp">
                             Требования: не менее 6 символов, обязательно цифры и специальные символы (!@#$%^&*...).
@@ -55,59 +60,59 @@
                         </div>
                     </div>
 
-                    <button type="submit" id="submitBtn" class="btn btn-success w-100" disabled>Зарегистрироваться</button>
-                </form>
-                
-                <div class="text-center mt-3">
-                    <a href="/login" class="text-decoration-none">Уже есть аккаунт? Войти</a>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+                    <!-- Скрипт для переключения видимости пароля и проверки сложности (Регистрация) -->
+                    <script>
+                    const passwordInput = document.getElementById('passwordInput');
+                    const strengthBar = document.getElementById('passwordStrengthBar');
+                    const passwordHelp = document.getElementById('passwordHelp');
+                    const submitBtn = document.getElementById('submitBtn');
+                    const toggleBtn = document.getElementById('togglePasswordRegister');
 
-<!-- JavaScript для проверки сложности пароля в реальном времени -->
-<script>
-const passwordInput = document.getElementById('passwordInput');
-const strengthBar = document.getElementById('passwordStrengthBar');
-const passwordHelp = document.getElementById('passwordHelp');
-const submitBtn = document.getElementById('submitBtn');
+                    // Переключение глазка
+                    toggleBtn.addEventListener('click', function () {
+                        if (passwordInput.type === 'password') {
+                            passwordInput.type = 'text';
+                            this.textContent = '🙈';
+                        } else {
+                            passwordInput.type = 'password';
+                            this.textContent = '👁️';
+                        }
+                    });
 
-passwordInput.addEventListener('input', function() {
-    const val = passwordInput.value;
-    let score = 0;
-    
-    // Проверки условий
-    const hasLength = val.length >= 6;
-    const hasNumber = /\d/.test(val);
-    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(val);
-    
-    if (hasLength) score += 1;
-    if (hasNumber) score += 1;
-    if (hasSpecial) score += 1;
-    
-    // Визуальное отображение
-    if (val.length === 0) {
-        strengthBar.style.width = '0%';
-        strengthBar.className = 'progress-bar';
-        passwordHelp.textContent = "Требования: не менее 6 символов, обязательно цифры и специальные символы.";
-        submitBtn.disabled = true;
-    } else if (score === 1) {
-        strengthBar.style.width = '33%';
-        strengthBar.className = 'progress-bar bg-danger';
-        passwordHelp.textContent = "Слабый пароль (добавьте цифры/спецсимволы)";
-        submitBtn.disabled = true;
-    } else if (score === 2) {
-        strengthBar.style.width = '66%';
-        strengthBar.className = 'progress-bar bg-warning';
-        passwordHelp.textContent = "Средний пароль";
-        submitBtn.disabled = true;
-    } else if (score === 3) {
-        strengthBar.style.width = '100%';
-        strengthBar.className = 'progress-bar bg-success';
-        passwordHelp.textContent = "Надежный пароль!";
-        submitBtn.disabled = false; // Разрешаем регистрацию
-    }
-});
-</script>
+                    // Проверка сложности
+                    passwordInput.addEventListener('input', function() {
+                        const val = passwordInput.value;
+                        let score = 0;
+                        
+                        const hasLength = val.length >= 6;
+                        const hasNumber = /\d/.test(val);
+                        const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(val);
+                        
+                        if (hasLength) score += 1;
+                        if (hasNumber) score += 1;
+                        if (hasSpecial) score += 1;
+                        
+                        if (val.length === 0) {
+                            strengthBar.style.width = '0%';
+                            strengthBar.className = 'progress-bar';
+                            passwordHelp.textContent = "Требования: не менее 6 символов, обязательно цифры и специальные символы.";
+                            submitBtn.disabled = true;
+                        } else if (score === 1) {
+                            strengthBar.style.width = '33%';
+                            strengthBar.className = 'progress-bar bg-danger';
+                            passwordHelp.textContent = "Слабый пароль (добавьте цифры/спецсимволы)";
+                            submitBtn.disabled = true;
+                        } else if (score === 2) {
+                            strengthBar.style.width = '66%';
+                            strengthBar.className = 'progress-bar bg-warning';
+                            passwordHelp.textContent = "Средний пароль";
+                            submitBtn.disabled = true;
+                        } else if (score === 3) {
+                            strengthBar.style.width = '100%';
+                            strengthBar.className = 'progress-bar bg-success';
+                            passwordHelp.textContent = "Надежный пароль!";
+                            submitBtn.disabled = false;
+                        }
+                    });
+                    </script>
 {% endblock %}
