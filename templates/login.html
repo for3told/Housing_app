@@ -17,8 +17,27 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Пароль:</label>
-                        <input type="password" name="password" class="form-control" required>
+                        <div class="input-group">
+                            <input type="password" name="password" id="passwordLogin" class="form-control" required>
+                            <button class="btn btn-outline-secondary" type="button" id="togglePasswordLogin">
+                                👁️
+                            </button>
+                        </div>
                     </div>
+
+                    <!-- Скрипт для переключения видимости пароля (Логин) -->
+                    <script>
+                    document.getElementById('togglePasswordLogin').addEventListener('click', function () {
+                        const passwordInput = document.getElementById('passwordLogin');
+                        if (passwordInput.type === 'password') {
+                            passwordInput.type = 'text';
+                            this.textContent = '🙈';
+                        } else {
+                            passwordInput.type = 'password';
+                            this.textContent = '👁️';
+                        }
+                    });
+                    </script>
                     <button type="submit" class="btn btn-primary w-100">Войти в систему</button>
                 </form>
                     <div class="text-center mt-3">
