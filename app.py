@@ -53,7 +53,7 @@ def register():
         apartment_id = request.form['apartment_id']
         
         # Бэкенд-валидация сложности пароля
-        if len(password) < 6 or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        if len(password) < 6 or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?":{}|<>_-]', password):
             error = "Пароль не соответствует требованиям безопасности (мин. 6 символов, цифры, спецсимволы)."
         else:
             # Проверяем, не занят ли логин
@@ -110,7 +110,7 @@ def login():
         
         # Ищем пользователя и подтягиваем название его роли
         cursor.execute("""
-            U.id, U.last_name, U.first_name, U.middle_name, U.username, U.password_hash, R.role_name
+            SELECT U.id, U.last_name, U.first_name, U.middle_name, U.username, U.password_hash, R.role_name
             FROM users U
             JOIN roles R ON U.role_id = R.id
             WHERE U.username = %s;

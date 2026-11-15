@@ -57,8 +57,10 @@
                         </div>
                         <div class="progress mt-2" style="height: 6px;">
                             <div id="passwordStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
-                        </div>
+                        </div>                        
                     </div>
+                    <button type="submit" id="submitBtn" class="btn btn-success w-100" disabled>Зарегистрироваться</button>
+                    </form>
 
                     <!-- Скрипт для переключения видимости пароля и проверки сложности (Регистрация) -->
                     <script>
@@ -86,7 +88,7 @@
                         
                         const hasLength = val.length >= 6;
                         const hasNumber = /\d/.test(val);
-                        const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(val);
+                        const hasSpecial = /[!@#$%^&*(),.?":{}|<>_-]/.test(val);
                         
                         if (hasLength) score += 1;
                         if (hasNumber) score += 1;
@@ -106,7 +108,7 @@
                             strengthBar.style.width = '66%';
                             strengthBar.className = 'progress-bar bg-warning';
                             passwordHelp.textContent = "Средний пароль";
-                            submitBtn.disabled = true;
+                            submitBtn.disabled = false;
                         } else if (score === 3) {
                             strengthBar.style.width = '100%';
                             strengthBar.className = 'progress-bar bg-success';
