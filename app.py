@@ -240,49 +240,71 @@ def admin_audit():
     
     return render_template('admin_audit.html', logs=logs)
 
+from datetime import datetime
+
 @app.route('/create_poll', methods=['GET', 'POST'])
 def create_poll():
-    # Проверяем, что зашел именно администратор
-    if 'user_id' not in session or session.get('role') != 'admin':
-        return redirect(url_for('index'))
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
         
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
     if request.method == 'POST':
         title = request.form['title']
         description = request.form['description']
+        building_id = request.form['building_id']
+        expires_at = request.form['expires_at']
+        is_anonymous = True if request.form.get('is_anonymous') == 'true' else False
         
-        # Собираем варианты ответов, которые заполнил админ
-        options = [
-            request.form.get('option1'),
-            request.form.get('option2'),
-            request.form.get('option3')
-        ]
-        # Убираем пустые варианты, если вдруг какие-то не заполнили
+        options = request.form.getlist('options')
         options = [opt.strip() for opt in options if opt and opt.strip()]
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 1. Создаем само голосование и получаем его ID
-        cursor.execute(
-            "INSERT INTO polls (title, description, is_active) VALUES (%s, %s, TRUE) RETURNING id;",
-            (title, description)
-        )
+        # 1. Создаем голосование
+        cursor.execute("""
+            INSERT INTO polls (title, description, building_id, created_by, expires_at, is_anonymous, is_active, is_closed) 
+            VALUES (%s, %s, %s, %s, %s, %s, TRUE, FALSE) RETURNING id;
+        """, (title, description, building_id, session['user_id'], expires_at, is_anonymous))
         poll_id = cursor.fetchone()[0]
         
-        # 2. Записываем варианты ответов для этого голосования
+        # 2. Записываем варианты
         for opt_text in options:
-            cursor.execute(
-                "INSERT INTO poll_options (poll_id, option_text) VALUES (%s, %s);",
-                (poll_id, opt_text)
-            )
+            cursor.execute("INSERT INTO poll_options (poll_id, option_text) VALUES (%s, %s);", (poll_id, opt_text))
             
+        # Логируем в аудит
+        cursor.execute("""
+            INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (session['user_id'], session['full_name'], "CREATE_POLL", f"Создано голосование ID {poll_id}", request.remote_addr))
+        
         conn.commit()
         cursor.close()
         conn.close()
-        
         return redirect(url_for('index'))
         
-    return render_template('create_poll.html')
+    cursor.execute("SELECT * FROM buildings ORDER BY address;")
+    buildings = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return render_template('create_poll.html', buildings=buildings)
+
+@app.route('/poll/action/<int:poll_id>/<action>', methods=['POST'])
+def poll_action(poll_id, action):
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if action == 'close':
+        cursor.execute("UPDATE polls SET is_active = FALSE, is_closed = TRUE WHERE id = %s;", (poll_id,))
+    elif action == 'delete':
+        cursor.execute("DELETE FROM polls WHERE id = %s;", (poll_id,))
+        
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('index'))
 
 @app.route('/vote/<int:poll_id>', methods=['GET', 'POST'])
 def vote(poll_id):
@@ -293,8 +315,13 @@ def vote(poll_id):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # 1. Получаем информацию о самом голосовании
-    cursor.execute("SELECT * FROM polls WHERE id = %s;", (poll_id,))
+    # 1. Получаем опрос вместе с адресом дома
+    cursor.execute("""
+        SELECT p.*, b.address as building_address 
+        FROM polls p 
+        JOIN buildings b ON p.building_id = b.id 
+        WHERE p.id = %s;
+    """, (poll_id,))
     poll = cursor.fetchone()
     
     if not poll:
@@ -302,32 +329,44 @@ def vote(poll_id):
         conn.close()
         return "Голосование не найдено", 404
         
-    # 2. Проверяем, голосовал ли уже этот пользователь в данном опросе
+    # Проверка просрочки на лету
+    if poll['is_active'] and poll['expires_at'] < datetime.now():
+        cursor.execute("UPDATE polls SET is_active = FALSE WHERE id = %s;", (poll_id,))
+        conn.commit()
+        poll['is_active'] = False
+
+    # 2. Проверяем, голосовал ли уже пользователь
     cursor.execute("SELECT * FROM votes WHERE poll_id = %s AND user_id = %s;", (poll_id, user_id))
     user_vote = cursor.fetchone()
     has_voted = (user_vote is not None)
     
     error = None
     
-    # 3. Если пользователь отправил голос (метод POST)
-    if request.method == 'POST' and not has_voted:
+    # 3. Обработка отправки голоса
+    if request.method == 'POST' and not has_voted and poll['is_active'] and not poll['is_closed']:
         option_id = request.form.get('option_id')
         if option_id:
             try:
-                # Записываем голос в базу
                 cursor.execute(
                     "INSERT INTO votes (poll_id, user_id, option_id) VALUES (%s, %s, %s);",
                     (poll_id, user_id, option_id)
                 )
                 conn.commit()
                 has_voted = True
+                
+                # Логируем голос в аудит
+                cursor.execute("""
+                    INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                    VALUES (%s, %s, %s, %s, %s);
+                """, (user_id, session['full_name'], "VOTE", f"Участие в голосовании ID {poll_id}", request.remote_addr))
+                conn.commit()
             except Exception as e:
                 conn.rollback()
-                error = "Произошла ошибка или вы уже проголосовали!"
+                error = "Ошибка при фиксации голоса!"
         else:
-            error = "Пожалуйста, выберите вариант ответа."
+            error = "Выберите вариант ответа."
 
-    # 4. Получаем варианты ответов и подсчитываем количество голосов для каждого
+    # 4. Подсчет голосов по вариантам
     cursor.execute("""
         SELECT po.id, po.option_text, 
                (SELECT COUNT(*) FROM votes v WHERE v.option_id = po.id) as vote_count
@@ -336,10 +375,23 @@ def vote(poll_id):
     """, (poll_id,))
     options = cursor.fetchall()
     
+    # 5. Получение списка проголосовавших (учитывая новую связь через раздельную таблицу apartments)
+    voters = []
+    if not poll['is_anonymous']:
+        cursor.execute("""
+            SELECT u.last_name, u.first_name, a.apartment_number, po.option_text
+            FROM votes v
+            JOIN users u ON v.user_id = u.id
+            LEFT JOIN apartments a ON u.apartment_id = a.id
+            JOIN poll_options po ON v.option_id = po.id
+            WHERE v.poll_id = %s;
+        """, (poll_id,))
+        voters = cursor.fetchall()
+
     cursor.close()
     conn.close()
     
-    return render_template('vote.html', poll=poll, options=options, has_voted=has_voted, error=error)
+    return render_template('vote.html', poll=poll, options=options, voters=voters, has_voted=has_voted, error=error)
 
 # --- УПРАВЛЕНИЕ ЗДАНИЯМИ И АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ КВАРТИР ---
 

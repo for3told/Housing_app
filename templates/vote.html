@@ -1,24 +1,51 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-8">
+    <div class="col-md-9">
         <div class="card shadow">
             <div class="card-body p-4">
-                <h3 class="card-title text-primary mb-3">{{ poll['title'] }}</h3>
-                <p class="card-text text-muted mb-4">{{ poll['description'] }}</p>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h3 class="card-title text-primary">{{ poll['title'] }}</h3>
+                    <div>
+                        {% if poll['is_anonymous'] %}
+                            <span class="badge bg-secondary">🥷 Анонимное</span>
+                        {% else %}
+                            <span class="badge bg-info text-dark">🌐 Публичное</span>
+                        {% endif %}
+                        
+                        {% if not poll['is_active'] or poll['is_closed'] %}
+                            <span class="badge bg-danger">🔴 Завершено</span>
+                        {% else %}
+                            <span class="badge bg-success">🟢 Активно до: {{ poll['expires_at'].strftime('%d.%m.%Y %H:%M') }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <p class="card-text text-muted mt-2">{{ poll['description'] }}</p>
+                <p class="text-secondary small">📍 Дом: <strong>{{ poll['building_address'] }}</strong></p>
                 <hr>
 
                 {% if error %}
                     <div class="alert alert-danger" role="alert">{{ error }}</div>
                 {% endif %}
 
-                {% if has_voted %}
-                    <!-- Если жилец уже голосовал, показываем сообщение и результаты -->
+                <!-- Управление для диспетчера/админа прямо на странице голосования -->
+                {% if session['role'] in ['admin', 'dispatcher'] and poll['is_active'] %}
+                    <form action="/poll/action/{{ poll['id'] }}/close" method="POST" class="mb-3">
+                        <button type="submit" class="btn btn-warning btn-sm">🔒 Закрыть голосование досрочно</button>
+                    </form>
+                {% endif %}
+
+                {% if has_voted or not poll['is_active'] or poll['is_closed'] %}
                     <div class="alert alert-success" role="alert">
-                        ✅ Вы уже приняли участие в этом голосовании. Спасибо за вашу гражданскую позицию!
+                        {% if has_voted %}
+                            ✅ Вы уже приняли участие в этом голосовании.
+                        {% else %}
+                            ℹ️ Голосование завершено или закрыто. Ниже приведены итоговые результаты.
+                        {% endif %}
                     </div>
 
-                    <h5 class="mt-4 mb-3">Текущие результаты голосования:</h5>
+                    <h5 class="mt-4 mb-3">Результаты голосования:</h5>
                     <ul class="list-group mb-4">
                         {% for option in options %}
                             <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -27,8 +54,29 @@
                             </li>
                         {% endfor %}
                     </ul>
+
+                    <!-- Блок отображения списков проголосовавших -->
+                    {% if not poll['is_anonymous'] %}
+                        <h5 class="mt-4 mb-3">📋 Список участников:</h5>
+                        <ul class="list-group">
+                            {% for v in voters %}
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span>{{ v['last_name'] }} {{ v['first_name'] }} (Кв. {{ v['apartment_number'] }})</span>
+                                    <!-- Вариант ответа видят ТОЛЬКО админы и диспетчеры -->
+                                    {% if session['role'] in ['admin', 'dispatcher'] %}
+                                        <span class="badge bg-dark">Выбрал: {{ v['option_text'] }}</span>
+                                    {% else %}
+                                        <span class="text-muted small">Проголосовал</span>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <div class="alert alert-secondary">Голосование анонимное. ФИО участников скрыты.</div>
+                    {% endif %}
+
                 {% else %}
-                    <!-- Если еще не голосовал, показываем форму выбора -->
+                    <!-- Форма для голосования -->
                     <form method="POST">
                         <h5 class="mb-3">Выберите вариант ответа:</h5>
                         {% for option in options %}
