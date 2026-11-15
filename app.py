@@ -327,5 +327,86 @@ def vote(poll_id):
     
     return render_template('vote.html', poll=poll, options=options, has_voted=has_voted, error=error)
 
+# --- УПРАВЛЕНИЕ ЗДАНИЯМИ И АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ КВАРТИР ---
+
+@app.route('/admin/buildings')
+def admin_buildings():
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM buildings ORDER BY address;")
+    buildings = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return render_template('admin_buildings.html', buildings=buildings)
+
+@app.route('/admin/buildings/add', methods=['GET', 'POST'])
+def add_building():
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    error = None
+    if request.method == 'POST':
+        address = request.form['address'].strip()
+        floors_count = int(request.form['floors_count'])
+        entrances_count = int(request.form['entrances_count'])
+        apartments_count = int(request.form['apartments_count'])
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 1. Создаем здание
+            cursor.execute("""
+                INSERT INTO buildings (address, floors_count, entrances_count, apartments_count)
+                VALUES (%s, %s, %s, %s) RETURNING id;
+            """, (address, floors_count, entrances_count, apartments_count))
+            building_id = cursor.fetchone()[0]
+            
+            # 2. Генерируем квартиры по подъездам
+            current_apt_number = 1
+            for ent in range(1, entrances_count + 1):
+                # Сколько квартир в этом подъезде указал пользователь
+                aps_in_entrance = int(request.form.get(f'entrance_aps_{ent}', 10))
+                
+                # Распределяем квартиры по этажам внутри подъезда
+                aps_per_floor = max(1, aps_in_entrance // floors_count)
+                
+                for apt_index in range(aps_in_entrance):
+                    # Вычисляем этаж для квартиры
+                    floor = (apt_index // aps_per_floor) + 1
+                    if floor > floors_count:
+                        floor = floors_count # Остаток уходит на верхний этаж
+                        
+                    apt_num_str = str(current_apt_number)
+                    
+                    cursor.execute("""
+                        INSERT INTO apartments (building_id, entrance, floor, apartment_number)
+                        VALUES (%s, %s, %s, %s);
+                    """, (building_id, ent, floor, apt_num_str))
+                    
+                    current_apt_number += 1
+
+            # Логируем действие в аудит
+            cursor.execute("""
+                INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                VALUES (%s, %s, %s, %s, %s);
+            """, (session['user_id'], session['full_name'], "ADD_BUILDING", f"Дом по адресу '{address}' добавлен, сгенерировано квартир: {apartments_count}", request.remote_addr))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return redirect(url_for('admin_buildings'))
+            
+        except Exception as e:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            error = f"Ошибка при создании здания: {str.e}"
+
+    return render_template('add_building.html', error=error)
 if __name__ == '__main__':
     app.run(debug=True)

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>🏢 Управление жилым фондом (Здания)</h2>
+            <a href="/admin/buildings/add" class="btn btn-primary">➕ Добавить новый дом</a>
+        </div>
+        
+        <div class="card shadow">
+            <div class="card-body">
+                <table class="table table-striped align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>ID</th>
+                            <th>Адрес</th>
+                            <th>Этажей</th>
+                            <th>Подъездов</th>
+                            <th>Всего квартир</th>
+                            <th>Жильцов в доме</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in buildings %}
+                        <tr>
+                            <td>{{ b['id'] }}</td>
+                            <td><strong>{{ b['address'] }}</strong></td>
+                            <td>{{ b['floors_count'] }}</td>
+                            <td>{{ b['entrances_count'] }}</td>
+                            <td>{{ b['apartments_count'] }}</td>
+                            <td><span class="badge bg-info text-dark">{{ b['total_residents'] }} чел.</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <a href="/" class="btn btn-secondary mt-3">Назад на главную</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

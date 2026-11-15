@@ -27,7 +27,10 @@
                 <ul class="navbar-nav align-items-center mb-0">
                     {% if session.get('user_id') %}
                         <!-- Ссылки администратора (если роль admin) -->
-                        {% if session.get('role') == 'admin' %}
+                        {% if session.get('role') in ['admin', 'dispatcher'] %}
+                            <li class="nav-item me-3">
+                                <a class="nav-link text-warning" href="/admin/buildings">🏢 Дома</a>
+                            </li>
                             <li class="nav-item me-3">
                                 <a class="nav-link text-warning" href="/admin/users">👥 Пользователи</a>
                             </li>

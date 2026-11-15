@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h3 class="card-title mb-4">🏢 Добавление нового многоквартирного дома</h3>
+                
+                {% if error %}
+                    <div class="alert alert-danger" role="alert">{{ error }}</div>
+                {% endif %}
+
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Адрес здания:</label>
+                        <input type="text" name="address" class="form-control" placeholder="Например: ул. Ленина, д. 15" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Количество этажей:</label>
+                            <input type="number" name="floors_count" id="floorsCount" class="form-control" min="1" value="5" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Количество подъездов:</label>
+                            <input type="number" name="entrances_count" id="entrancesCount" class="form-control" min="1" value="2" required onchange="generateEntranceInputs()">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Всего квартир:</label>
+                            <input type="number" name="apartments_count" class="form-control" min="1" value="40" required>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h5 class="mb-3">Настройка квартир по подъездам:</h5>
+                    <p class="text-muted small">Укажите, сколько квартир находится в каждом подъезде. Сумма должна совпадать с общим количеством квартир.</p>
+                    
+                    <div id="entrancesConfigContainer" class="mb-4">
+                        <!-- Динамические поля подъездов генерируются через JS -->
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="/admin/buildings" class="btn btn-secondary">Назад к списку домов</a>
+                        <button type="submit" class="btn btn-success">Создать дом и сгенерировать квартиры</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function generateEntranceInputs() {
+    const entrancesCount = parseInt(document.getElementById('entrancesCount').value) || 1;
+    const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 40;
+    const container = document.getElementById('entrancesConfigContainer');
+    container.innerHTML = '';
+    
+    const perEntrance = Math.floor(totalApartments / entrancesCount);
+    let remainder = totalApartments % entrancesCount;
+
+    for (let i = 1; i <= entrancesCount; i++) {
+        let countForThis = perEntrance + (i <= remainder ? 1 : 0);
+        
+        const div = document.createElement('div');
+        div.className = 'mb-2 row align-items-center';
+        div.innerHTML = `
+            <label class="col-sm-6 col-form-label">Подъезд №${i} (кол-во квартир):</label>
+            <div class="col-sm-6">
+                <input type="number" name="entrance_aps_${i}" class="form-control entrance-ap-input" value="${countForThis}" min="1" required>
+            </div>
+        `;
+        container.appendChild(div);
+    }
+}
+
+// Генерируем при загрузке страницы
+document.addEventListener('DOMContentLoaded', generateEntranceInputs);
+document.querySelector('input[name="apartments_count"]').addEventListener('input', generateEntranceInputs);
+document.getElementById('entrancesCount').addEventListener('input', generateEntranceInputs);
+</script>
+{% endblock %}
