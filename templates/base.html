@@ -28,18 +28,14 @@
                     {% if session.get('user_id') %}
                         <!-- Ссылки администратора (если роль admin) -->
                         {% if session.get('role') in ['admin', 'dispatcher'] %}
-                            <li class="nav-item me-3">
-                                <a class="nav-link text-warning" href="/admin/buildings">🏢 Дома</a>
-                            </li>
-                            <li class="nav-item me-3">
-                                <a class="nav-link text-warning" href="/admin/users">👥 Пользователи</a>
-                            </li>
-                            <li class="nav-item me-3">
-                                <a class="nav-link text-warning" href="/admin/apartments">🏢 Квартиры</a>
-                            </li>
-                            <li class="nav-item me-3">
-                                <a class="nav-link text-warning" href="/admin/audit">🛡️ Аудит</a>
-                            </li>
+                            <li class="nav-item me-3"><a class="nav-link text-warning" href="/admin/buildings">🏢 Дома</a></li>
+                            <li class="nav-item me-3"><a class="nav-link text-warning" href="/admin/users">👥 Пользователи</a></li>
+                            <li class="nav-item me-3"><a class="nav-link text-warning" href="/admin/apartments">🚪 Квартиры</a></li>
+                        {% endif %}
+
+                        <!-- Аудит видит ТОЛЬКО администратор -->
+                        {% if session.get('role') == 'admin' %}
+                            <li class="nav-item me-3"><a class="nav-link text-danger" href="/admin/audit">🛡️ Аудит</a></li>
                         {% endif %}
 
                         <!-- ФИО пользователя -->

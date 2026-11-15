@@ -2,49 +2,55 @@
 {% block content %}
 <div class="row">
     <div class="col-md-12">
-        <h2 class="mb-4">👥 Управление пользователями и ролями</h2>
+        <h2 class="mb-4">👥 Управление пользователями системы</h2>
         <div class="card shadow">
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-striped align-middle">
-                        <thead>
+                        <thead class="table-dark">
                             <tr>
                                 <th>ID</th>
                                 <th>ФИО</th>
                                 <th>Логин</th>
-                                <th>Квартира / Адрес</th>
-                                <th>Текущая роль</th>
-                                <th>Изменить роль</th>
+                                <th>Роль</th>
+                                <th>Адрес / Квартира</th>
+                                {% if session.get('role') == 'admin' %}
+                                    <th>Действия (Изменение роли)</th>
+                                {% endif %}
                             </tr>
                         </thead>
                         <tbody>
                             {% for u in users %}
                             <tr>
                                 <td>{{ u['id'] }}</td>
-                                <td>{{ u['last_name'] }} {{ u['first_name'] }} {{ u['middle_name'] or '' }}</td>
+                                <td><strong>{{ u['last_name'] }} {{ u['first_name'] }} {{ u['middle_name'] or '' }}</strong></td>
                                 <td><code>{{ u['username'] }}</code></td>
-                                <td>
-                                    {% if u['address'] %}
-                                        {{ u['address'] }}, под. {{ u['entrance'] }}, кв. {{ u['apartment_number'] }}
-                                    {% else %}
-                                        <span class="text-muted">Не привязана (УК)</span>
-                                    {% endif %}
-                                </td>
                                 <td>
                                     <span class="badge bg-secondary">{{ u['role_name'] }}</span>
                                 </td>
                                 <td>
-                                    <form action="/admin/users/update_role/{{ u['id'] }}" method="POST" class="d-flex">
-                                        <select name="role_id" class="form-select form-select-sm me-2">
+                                    {% if u['address'] %}
+                                        {{ u['address'] }}, под. {{ u['entrance'] }}, кв. {{ u['apartment_number'] }}
+                                    {% else %}
+                                        <span class="text-muted">Не привязан</span>
+                                    {% endif %}
+                                </td>
+                                
+                                <!-- Управление ролями доступно ТОЛЬКО администратору -->
+                                {% if session.get('role') == 'admin' %}
+                                <td>
+                                    <form action="/admin/users/update_role/{{ u['id'] }}" method="POST" class="d-flex align-items-center gap-2">
+                                        <select name="role_id" class="form-select form-select-sm">
                                             {% for r in roles %}
                                                 <option value="{{ r['id'] }}" {% if r['role_name'] == u['role_name'] %}selected{% endif %}>
-                                                    {{ r['role_name'] }}
+                                                    {{ r['description'] }}
                                                 </option>
                                             {% endfor %}
                                         </select>
-                                        <button type="submit" class="btn btn-sm btn-outline-primary">Сохранить</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">Изменить</button>
                                     </form>
                                 </td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>

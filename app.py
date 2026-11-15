@@ -192,13 +192,12 @@ def logout():
 
 @app.route('/admin/users')
 def admin_users():
-    if session.get('role') != 'admin':
+    if session.get('role') not in ['admin', 'dispatcher']:
         return "Доступ запрещен", 403
         
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Делаем JOIN с таблицей buildings через apartments, чтобы получить address
     cursor.execute("""
         SELECT u.id, u.last_name, u.first_name, u.middle_name, u.username, 
                r.role_name, b.address, a.entrance, a.apartment_number
@@ -210,7 +209,6 @@ def admin_users():
     """)
     users = cursor.fetchall()
     
-    # Получаем список всех ролей для выпадающего списка
     cursor.execute("SELECT * FROM roles;")
     roles = cursor.fetchall()
     
