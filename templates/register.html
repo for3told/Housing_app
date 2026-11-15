@@ -32,15 +32,16 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Выберите вашу квартиру (Адрес, подъезд, №):</label>
-                        <select name="apartment_id" class="form-select" required>
-                            <option value="" disabled selected>-- Выберите квартиру --</option>
+                        <label class="form-label">Ваш адрес и квартира (начните вводить улицу или номер):</label>
+                        <!-- Инпут с подключенным datalist для быстрого поиска -->
+                        <input class="form-control" list="apartmentsOptions" id="apartmentSearchInput" placeholder="Например: Ленина, 10 или кв. 12" required>
+                        <datalist id="apartmentsOptions">
                             {% for apt in apartments %}
-                                <option value="{{ apt['id'] }}">
-                                    {{ apt['address'] }} | Подъезд №{{ apt['entrance'] }} | Кв. {{ apt['apartment_number'] }}
-                                </option>
+                                <option data-value="{{ apt['id'] }}" value="{{ apt['address'] }} | Подъезд №{{ apt['entrance'] }} | Кв. {{ apt['apartment_number'] }}"></option>
                             {% endfor %}
-                        </select>
+                        </datalist>
+                        <!-- Скрытое поле, которое уйдет на бэкенд в request.form['apartment_id'] -->
+                        <input type="hidden" name="apartment_id" id="apartmentIdHidden" required>
                     </div>
 
                     <div class="mb-3">
@@ -115,6 +116,20 @@
                             passwordHelp.textContent = "Надежный пароль!";
                             submitBtn.disabled = false;
                         }
+                    });
+
+                    document.getElementById('apartmentSearchInput').addEventListener('input', function(e) {
+                        const val = e.target.value;
+                        const options = document.querySelectorAll('#apartmentsOptions option');
+                        const hiddenInput = document.getElementById('apartmentIdHidden');
+                        
+                        hiddenInput.value = ''; // Сбрасываем пока не выбран точный вариант
+                        
+                        options.forEach(opt => {
+                            if (opt.value === val) {
+                                hiddenInput.value = opt.getAttribute('data-value');
+                            }
+                        });
                     });
                     </script>
 {% endblock %}

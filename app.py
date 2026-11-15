@@ -370,20 +370,28 @@ def add_building():
         address = request.form['address'].strip()
         floors_count = int(request.form['floors_count'])
         entrances_count = int(request.form['entrances_count'])
-        apartments_count = int(request.form['apartments_count'])
         
-        # Считаем сумму квартир по подъездам из формы
-        sum_entrance_aps = 0
-        entrance_data = []
-        for ent in range(1, entrances_count + 1):
-            aps = int(request.form.get(f'entrance_aps_{ent}', 0))
-            entrance_data.append(aps)
-            sum_entrance_aps += aps
+        # Проверяем, включена ли галочка автоматической генерации
+        auto_generate = True if request.form.get('auto_generate') == 'true' else False
+        
+        if auto_generate:
+            apartments_count = int(request.form['apartments_count'])
             
-        # ЖЕСТКАЯ ПРОВЕРКА: сумма должна строго равняться общему числу квартир
-        if sum_entrance_aps != apartments_count:
-            error = f"Ошибка валидации: Сумма квартир по подъездам ({sum_entrance_aps}) не равна общему количеству квартир ({apartments_count})!"
+            # Считаем сумму квартир по подъездам из формы
+            sum_entrance_aps = 0
+            entrance_data = []
+            for ent in range(1, entrances_count + 1):
+                aps = int(request.form.get(f'entrance_aps_{ent}', 0))
+                entrance_data.append(aps)
+                sum_entrance_aps += aps
+                
+            # Проверка: сумма должна строго равняться общему числу квартир
+            if sum_entrance_aps != apartments_count:
+                error = f"Ошибка валидации: Сумма квартир по подъездам ({sum_entrance_aps}) не равна общая сумма ({apartments_count})!"
         else:
+            apartments_count = 0 # Без генерации пока 0 квартир (появятся при ручном добавлении)
+
+        if not error:
             try:
                 # 1. Создаем здание
                 cursor.execute("""
@@ -392,30 +400,38 @@ def add_building():
                 """, (address, floors_count, entrances_count, apartments_count))
                 building_id = cursor.fetchone()[0]
                 
-                # 2. Генерируем квартиры по подъездам
-                current_apt_number = 1
-                for ent_idx, aps_in_entrance in enumerate(entrance_data, start=1):
-                    aps_per_floor = max(1, aps_in_entrance // floors_count)
-                    
-                    for apt_index in range(aps_in_entrance):
-                        floor = (apt_index // aps_per_floor) + 1
-                        if floor > floors_count:
-                            floor = floors_count
+                # 2. Если включена генерация — создаем квартиры
+                if auto_generate:
+                    current_apt_number = 1
+                    for ent_idx, aps_in_entrance in enumerate(entrance_data, start=1):
+                        aps_per_floor = max(1, aps_in_entrance // floors_count)
                         
-                        apt_num_str = str(current_apt_number)
-                        
-                        cursor.execute("""
-                            INSERT INTO apartments (building_id, entrance, floor, apartment_number)
-                            VALUES (%s, %s, %s, %s);
-                        """, (building_id, ent_idx, floor, apt_num_str))
-                        
-                        current_apt_number += 1
+                        for apt_index in range(aps_in_entrance):
+                            floor = (apt_index // aps_per_floor) + 1
+                            if floor > floors_count:
+                                floor = floors_count
+                            
+                            apt_num_str = str(current_apt_number)
+                            
+                            cursor.execute("""
+                                INSERT INTO apartments (building_id, entrance, floor, apartment_number)
+                                VALUES (%s, %s, %s, %s);
+                            """, (building_id, ent_idx, floor, apt_num_str))
+                            
+                            current_apt_number += 1
+                            
+                    # Синхронизируем реальное количество квартир
+                    cursor.execute("""
+                        UPDATE buildings 
+                        SET apartments_count = (SELECT COUNT(*) FROM apartments WHERE building_id = %s)
+                        WHERE id = %s;
+                    """, (building_id, building_id))
 
                 # Логируем действие в аудит
                 cursor.execute("""
                     INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
                     VALUES (%s, %s, %s, %s, %s);
-                """, (session['user_id'], session['full_name'], "ADD_BUILDING", f"Дом по адресу '{address}' добавлен, квартир: {apartments_count}", request.remote_addr))
+                """, (session['user_id'], session['full_name'], "ADD_BUILDING", f"Добавлен дом '{address}' (генерация квартир: {auto_generate})", request.remote_addr))
                 
                 conn.commit()
                 cursor.close()

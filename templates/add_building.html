@@ -26,22 +26,36 @@
                             <input type="number" name="entrances_count" id="entrancesCount" class="form-control" min="1" value="2" required onchange="generateEntranceInputs()">
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Всего квартир:</label>
-                            <input type="number" name="apartments_count" class="form-control" min="1" value="40" required>
+                            <label class="form-label">Всего квартир (план):</label>
+                            <input type="number" name="apartments_count" class="form-control" min="0" value="40" required>
                         </div>
                     </div>
 
-                    <hr>
-                    <h5 class="mb-3">Настройка квартир по подъездам:</h5>
-                    <p class="text-muted small">Укажите, сколько квартир находится в каждом подъезде. Сумма должна совпадать с общим количеством квартир.</p>
-                    
-                    <div id="entrancesConfigContainer" class="mb-4">
-                        <!-- Динамические поля подъездов генерируются через JS -->
+                    <!-- Чекбокс опциональной генерации квартир -->
+                    <div class="form-check form-switch d-flex justify-content-between align-items-center mb-4 p-3 bg-light rounded border">
+                        <div>
+                            <label class="form-check-label fw-bold" for="autoGenerateSwitch">
+                                ✨ Автоматически сгенерировать квартиры при создании
+                            </label>
+                            <div class="form-text text-muted mb-0">Если выключено, дом создастся без квартир (их можно будет добавить вручную позже).</div>
+                        </div>
+                        <input class="form-check-input ms-3" type="checkbox" role="switch" name="auto_generate" id="autoGenerateSwitch" value="true" checked onchange="toggleGenerationBlock()" style="width: 3em; height: 1.5em; cursor: pointer;">
+                    </div>
+
+                    <!-- Блок настройки квартир (скрывается при выключенном чекбоксе) -->
+                    <div id="generationSection">
+                        <hr>
+                        <h5 class="mb-3">Настройка квартир по подъездам:</h5>
+                        <p class="text-muted small">Укажите, сколько квартир находится в каждом подъезде. Сумма должна совпадать с общим количеством квартир.</p>
+                        
+                        <div id="entrancesConfigContainer" class="mb-4">
+                            <!-- Динамические поля подъездов генерируются через JS -->
+                        </div>
                     </div>
 
                     <div class="d-flex justify-content-between">
                         <a href="/admin/buildings" class="btn btn-secondary">Назад к списку домов</a>
-                        <button type="submit" class="btn btn-success">Создать дом и сгенерировать квартиры</button>
+                        <button type="submit" id="submitBtn" class="btn btn-success">Создать дом</button>
                     </div>
                 </form>
             </div>
@@ -50,39 +64,25 @@
 </div>
 
 <script>
-function generateEntranceInputs() {
-    const entrancesCount = parseInt(document.getElementById('entrancesCount').value) || 1;
-    const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 40;
-    const container = document.getElementById('entrancesConfigContainer');
-    container.innerHTML = '';
+function toggleGenerationBlock() {
+    const isChecked = document.getElementById('autoGenerateSwitch').checked;
+    const section = document.getElementById('generationSection');
+    const submitBtn = document.getElementById('submitBtn');
     
-    const perEntrance = Math.floor(totalApartments / entrancesCount);
-    let remainder = totalApartments % entrancesCount;
-
-    for (let i = 1; i <= entrancesCount; i++) {
-        let countForThis = perEntrance + (i <= remainder ? 1 : 0);
-        
-        const div = document.createElement('div');
-        div.className = 'mb-2 row align-items-center';
-        div.innerHTML = `
-            <label class="col-sm-6 col-form-label">Подъезд №${i} (кол-во квартир):</label>
-            <div class="col-sm-6">
-                <input type="number" name="entrance_aps_${i}" class="form-control entrance-ap-input" value="${countForThis}" min="1" required>
-            </div>
-        `;
-        container.appendChild(div);
+    if (isChecked) {
+        section.style.display = 'block';
+        submitBtn.textContent = 'Создать дом и сгенерировать квартиры';
+        validateSum();
+    } else {
+        section.style.display = 'none';
+        submitBtn.textContent = 'Создать дом (без квартир)';
+        // Убираем предупреждения об ошибках суммы, если они были
+        const warningDiv = document.getElementById('sumWarning');
+        if (warningDiv) warningDiv.style.display = 'none';
+        submitBtn.disabled = false;
     }
 }
 
-
-
-        // Генерируем при загрузке страницы
-        document.addEventListener('DOMContentLoaded', generateEntranceInputs);
-        document.querySelector('input[name="apartments_count"]').addEventListener('input', generateEntranceInputs);
-        document.getElementById('entrancesCount').addEventListener('input', generateEntranceInputs);
-</script>
-
-<script>
 function generateEntranceInputs() {
     const entrancesCount = parseInt(document.getElementById('entrancesCount').value) || 1;
     const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 0;
@@ -109,13 +109,22 @@ function generateEntranceInputs() {
 }
 
 function validateSum() {
+    if (!document.getElementById('autoGenerateSwitch').checked) return;
+    
     const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 0;
     const inputs = document.querySelectorAll('.entrance-ap-input');
     let sum = 0;
     inputs.forEach(inp => sum += parseInt(inp.value) || 0);
     
     const submitBtn = document.getElementById('submitBtn');
-    const warningDiv = document.getElementById('sumWarning') || createWarningDiv();
+    let warningDiv = document.getElementById('sumWarning');
+    
+    if (!warningDiv) {
+        warningDiv = document.createElement('div');
+        warningDiv.id = 'sumWarning';
+        warningDiv.className = 'alert alert-danger mt-2';
+        document.querySelector('form').insertBefore(warningDiv, submitBtn);
+    }
 
     if (sum !== totalApartments) {
         warningDiv.textContent = `Внимание: Сумма квартир по подъездам (${sum}) не совпадает с общим числом квартир (${totalApartments})!`;
@@ -127,15 +136,10 @@ function validateSum() {
     }
 }
 
-function createWarningDiv() {
-    const div = document.createElement('div');
-    div.id = 'sumWarning';
-    div.className = 'alert alert-danger mt-2';
-    document.querySelector('form').insertBefore(div, document.getElementById('submitBtn'));
-    return div;
-}
-
-document.addEventListener('DOMContentLoaded', generateEntranceInputs);
+document.addEventListener('DOMContentLoaded', function() {
+    generateEntranceInputs();
+    toggleGenerationBlock();
+});
 document.querySelector('input[name="apartments_count"]').addEventListener('input', generateEntranceInputs);
 document.getElementById('entrancesCount').addEventListener('input', generateEntranceInputs);
 </script>
