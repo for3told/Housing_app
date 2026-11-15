@@ -40,10 +40,10 @@ def index():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    error = None
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    error = None
     if request.method == 'POST':
         last_name = request.form['last_name'].strip()
         first_name = request.form['first_name'].strip()
@@ -53,7 +53,7 @@ def register():
         apartment_id = request.form['apartment_id']
         
         # Бэкенд-валидация сложности пароля
-        if len(password) < 6 or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?":{}|<>_-]', password):
+        if len(password) < 6 or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
             error = "Пароль не соответствует требованиям безопасности (мин. 6 символов, цифры, спецсимволы)."
         else:
             # Проверяем, не занят ли логин
@@ -61,7 +61,7 @@ def register():
             if cursor.fetchone():
                 error = "Пользователь с таким логином уже существует!"
             else:
-                # Получаем role_id для жильца ('resident'). В нашей таблице ролей resident обычно имеет id = 3 (или проверим)
+                # Получаем role_id для жильца ('resident')
                 cursor.execute("SELECT id FROM roles WHERE role_name = 'resident';")
                 role_row = cursor.fetchone()
                 role_id = role_row['id'] if role_row else 3
@@ -88,9 +88,15 @@ def register():
                 conn.close()
                 return redirect(url_for('login'))
 
-    # Получаем список квартир для выпадающего списка
-    cursor.execute("SELECT id, address, entrance, apartment_number FROM apartments ORDER BY address, entrance, apartment_number;")
+    # Получаем список квартир для выпадающего списка (выполняется как при GET, так и если при POST была ошибка)
+    cursor.execute("""
+        SELECT a.id, b.address, a.entrance, a.apartment_number 
+        FROM apartments a
+        JOIN buildings b ON a.building_id = b.id
+        ORDER BY b.address, a.entrance, a.apartment_number;
+    """)
     apartments = cursor.fetchall()
+    
     cursor.close()
     conn.close()
     
@@ -349,64 +355,166 @@ def add_building():
         return "Доступ запрещен", 403
         
     error = None
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
     if request.method == 'POST':
         address = request.form['address'].strip()
         floors_count = int(request.form['floors_count'])
         entrances_count = int(request.form['entrances_count'])
         apartments_count = int(request.form['apartments_count'])
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # Считаем сумму квартир по подъездам из формы
+        sum_entrance_aps = 0
+        entrance_data = []
+        for ent in range(1, entrances_count + 1):
+            aps = int(request.form.get(f'entrance_aps_{ent}', 0))
+            entrance_data.append(aps)
+            sum_entrance_aps += aps
+            
+        # ЖЕСТКАЯ ПРОВЕРКА: сумма должна строго равняться общему числу квартир
+        if sum_entrance_aps != apartments_count:
+            error = f"Ошибка валидации: Сумма квартир по подъездам ({sum_entrance_aps}) не равна общему количеству квартир ({apartments_count})!"
+        else:
+            try:
+                # 1. Создаем здание
+                cursor.execute("""
+                    INSERT INTO buildings (address, floors_count, entrances_count, apartments_count)
+                    VALUES (%s, %s, %s, %s) RETURNING id;
+                """, (address, floors_count, entrances_count, apartments_count))
+                building_id = cursor.fetchone()[0]
+                
+                # 2. Генерируем квартиры по подъездам
+                current_apt_number = 1
+                for ent_idx, aps_in_entrance in enumerate(entrance_data, start=1):
+                    aps_per_floor = max(1, aps_in_entrance // floors_count)
+                    
+                    for apt_index in range(aps_in_entrance):
+                        floor = (apt_index // aps_per_floor) + 1
+                        if floor > floors_count:
+                            floor = floors_count
+                        
+                        apt_num_str = str(current_apt_number)
+                        
+                        cursor.execute("""
+                            INSERT INTO apartments (building_id, entrance, floor, apartment_number)
+                            VALUES (%s, %s, %s, %s);
+                        """, (building_id, ent_idx, floor, apt_num_str))
+                        
+                        current_apt_number += 1
+
+                # Логируем действие в аудит
+                cursor.execute("""
+                    INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                    VALUES (%s, %s, %s, %s, %s);
+                """, (session['user_id'], session['full_name'], "ADD_BUILDING", f"Дом по адресу '{address}' добавлен, квартир: {apartments_count}", request.remote_addr))
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return redirect(url_for('admin_buildings'))
+                
+            except Exception as e:
+                conn.rollback()
+                error = f"Ошибка базы данных: {str(e)}"
+
+    cursor.close()
+    conn.close()
+    return render_template('add_building.html', error=error)
+
+# --- РЕДАКТИРОВАНИЕ ЗДАНИЯ И ЕГО КВАРТИР ---
+
+@app.route('/admin/buildings/edit/<int:building_id>', methods=['GET', 'POST'])
+def edit_building(building_id):
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    error = None
+    success = None
+    
+    if request.method == 'POST':
+        address = request.form['address'].strip()
+        floors_count = int(request.form['floors_count'])
+        entrances_count = int(request.form['entrances_count'])
         
         try:
-            # 1. Создаем здание
             cursor.execute("""
-                INSERT INTO buildings (address, floors_count, entrances_count, apartments_count)
-                VALUES (%s, %s, %s, %s) RETURNING id;
-            """, (address, floors_count, entrances_count, apartments_count))
-            building_id = cursor.fetchone()[0]
+                UPDATE buildings 
+                SET address = %s, floors_count = %s, entrances_count = %s
+                WHERE id = %s;
+            """, (address, floors_count, entrances_count, building_id))
             
-            # 2. Генерируем квартиры по подъездам
-            current_apt_number = 1
-            for ent in range(1, entrances_count + 1):
-                # Сколько квартир в этом подъезде указал пользователь
-                aps_in_entrance = int(request.form.get(f'entrance_aps_{ent}', 10))
-                
-                # Распределяем квартиры по этажам внутри подъезда
-                aps_per_floor = max(1, aps_in_entrance // floors_count)
-                
-                for apt_index in range(aps_in_entrance):
-                    # Вычисляем этаж для квартиры
-                    floor = (apt_index // aps_per_floor) + 1
-                    if floor > floors_count:
-                        floor = floors_count # Остаток уходит на верхний этаж
-                        
-                    apt_num_str = str(current_apt_number)
-                    
-                    cursor.execute("""
-                        INSERT INTO apartments (building_id, entrance, floor, apartment_number)
-                        VALUES (%s, %s, %s, %s);
-                    """, (building_id, ent, floor, apt_num_str))
-                    
-                    current_apt_number += 1
-
-            # Логируем действие в аудит
+            # Логируем действие
             cursor.execute("""
                 INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
                 VALUES (%s, %s, %s, %s, %s);
-            """, (session['user_id'], session['full_name'], "ADD_BUILDING", f"Дом по адресу '{address}' добавлен, сгенерировано квартир: {apartments_count}", request.remote_addr))
+            """, (session['user_id'], session['full_name'], "EDIT_BUILDING", f"Обновлены данные дома ID {building_id}", request.remote_addr))
             
             conn.commit()
-            cursor.close()
-            conn.close()
-            return redirect(url_for('admin_buildings'))
-            
+            success = "Данные дома успешно обновлены!"
         except Exception as e:
             conn.rollback()
-            cursor.close()
-            conn.close()
-            error = f"Ошибка при создании здания: {str.e}"
+            error = f"Ошибка при обновлении: {str(e)}"
 
-    return render_template('add_building.html', error=error)
+    # Получаем информацию о здании
+    cursor.execute("SELECT * FROM buildings WHERE id = %s;", (building_id,))
+    building = cursor.fetchone()
+    
+    if not building:
+        cursor.close()
+        conn.close()
+        return "Здание не найдено", 404
+
+    # Получаем список всех квартир этого дома, отсортированных по подъездам и этажам
+    cursor.execute("""
+        SELECT * FROM apartments 
+        WHERE building_id = %s 
+        ORDER BY entrance, floor, apartment_number;
+    """, (building_id,))
+    apartments = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('edit_building.html', building=building, apartments=apartments, error=error, success=success)
+
+# Ручное добавление квартиры к дому
+@app.route('/admin/apartments/add/<int:building_id>', methods=['POST'])
+def add_apartment_manual(building_id):
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    entrance = int(request.form['entrance'])
+    floor = int(request.form['floor'])
+    apartment_number = request.form['apartment_number'].strip()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Добавляем квартиру
+        cursor.execute("""
+            INSERT INTO apartments (building_id, entrance, floor, apartment_number, resident_count)
+            VALUES (%s, %s, %s, %s, 0);
+        """, (building_id, entrance, floor, apartment_number))
+        
+        # Автоматически пересчитываем и обновляем apartments_count в таблице buildings
+        cursor.execute("""
+            UPDATE buildings 
+            SET apartments_count = (SELECT COUNT(*) FROM apartments WHERE building_id = %s)
+            WHERE id = %s;
+        """, (building_id, building_id))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        
+    cursor.close()
+    conn.close()
+    return redirect(url_for('edit_building', building_id=building_id))
+
 if __name__ == '__main__':
     app.run(debug=True)

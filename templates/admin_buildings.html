@@ -18,6 +18,7 @@
                             <th>Подъездов</th>
                             <th>Всего квартир</th>
                             <th>Жильцов в доме</th>
+                            <th>Действия</th> <!-- Новая колонка -->
                         </tr>
                     </thead>
                     <tbody>
@@ -29,6 +30,9 @@
                             <td>{{ b['entrances_count'] }}</td>
                             <td>{{ b['apartments_count'] }}</td>
                             <td><span class="badge bg-info text-dark">{{ b['total_residents'] }} чел.</span></td>
+                            <td>
+                                <a href="/admin/buildings/edit/{{ b['id'] }}" class="btn btn-sm btn-outline-primary">⚙️ Управление квартирами</a>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

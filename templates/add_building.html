@@ -74,7 +74,67 @@ function generateEntranceInputs() {
     }
 }
 
-// Генерируем при загрузке страницы
+
+
+        // Генерируем при загрузке страницы
+        document.addEventListener('DOMContentLoaded', generateEntranceInputs);
+        document.querySelector('input[name="apartments_count"]').addEventListener('input', generateEntranceInputs);
+        document.getElementById('entrancesCount').addEventListener('input', generateEntranceInputs);
+</script>
+
+<script>
+function generateEntranceInputs() {
+    const entrancesCount = parseInt(document.getElementById('entrancesCount').value) || 1;
+    const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 0;
+    const container = document.getElementById('entrancesConfigContainer');
+    container.innerHTML = '';
+    
+    const perEntrance = Math.floor(totalApartments / entrancesCount);
+    let remainder = totalApartments % entrancesCount;
+
+    for (let i = 1; i <= entrancesCount; i++) {
+        let countForThis = perEntrance + (i <= remainder ? 1 : 0);
+        
+        const div = document.createElement('div');
+        div.className = 'mb-2 row align-items-center';
+        div.innerHTML = `
+            <label class="col-sm-6 col-form-label">Подъезд №${i} (кол-во квартир):</label>
+            <div class="col-sm-6">
+                <input type="number" name="entrance_aps_${i}" class="form-control entrance-ap-input" value="${countForThis}" min="1" required oninput="validateSum()">
+            </div>
+        `;
+        container.appendChild(div);
+    }
+    validateSum();
+}
+
+function validateSum() {
+    const totalApartments = parseInt(document.querySelector('input[name="apartments_count"]').value) || 0;
+    const inputs = document.querySelectorAll('.entrance-ap-input');
+    let sum = 0;
+    inputs.forEach(inp => sum += parseInt(inp.value) || 0);
+    
+    const submitBtn = document.getElementById('submitBtn');
+    const warningDiv = document.getElementById('sumWarning') || createWarningDiv();
+
+    if (sum !== totalApartments) {
+        warningDiv.textContent = `Внимание: Сумма квартир по подъездам (${sum}) не совпадает с общим числом квартир (${totalApartments})!`;
+        warningDiv.style.display = 'block';
+        submitBtn.disabled = true;
+    } else {
+        warningDiv.style.display = 'none';
+        submitBtn.disabled = false;
+    }
+}
+
+function createWarningDiv() {
+    const div = document.createElement('div');
+    div.id = 'sumWarning';
+    div.className = 'alert alert-danger mt-2';
+    document.querySelector('form').insertBefore(div, document.getElementById('submitBtn'));
+    return div;
+}
+
 document.addEventListener('DOMContentLoaded', generateEntranceInputs);
 document.querySelector('input[name="apartments_count"]').addEventListener('input', generateEntranceInputs);
 document.getElementById('entrancesCount').addEventListener('input', generateEntranceInputs);

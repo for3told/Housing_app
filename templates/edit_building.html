@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>🏢 Редактирование дома: {{ building['address'] }}</h2>
+            <a href="/admin/buildings" class="btn btn-secondary">Назад к списку домов</a>
+        </div>
+
+        {% if error %}
+            <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+            <div class="alert alert-success" role="alert">{{ success }}</div>
+        {% endif %}
+        
+        <!-- Вывод ошибки удаления квартиры, если передана через сессию -->
+        {% if session.get('apt_delete_error') %}
+            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                {{ session.pop('apt_delete_error') }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endif %}
+
+        <!-- Карточка редактирования общих данных дома -->
+        <div class="card shadow mb-4">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Параметры здания</h5>
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Адрес:</label>
+                            <input type="text" name="address" class="form-control" value="{{ building['address'] }}" required>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Количество этажей:</label>
+                            <input type="number" name="floors_count" class="form-control" value="{{ building['floors_count'] }}" min="1" required>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Количество подъездов:</label>
+                            <input type="number" name="entrances_count" class="form-control" value="{{ building['entrances_count'] }}" min="1" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Сохранить изменения дома</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Управление квартирами дома -->
+        <div class="card shadow">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Список квартир в доме (всего: {{ apartments|length }})</h5>
+                
+                <!-- Форма добавления отдельной квартиры -->
+                <form action="/admin/apartments/add/{{ building['id'] }}" method="POST" class="row g-3 mb-4 p-3 bg-light rounded border align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small">Номер подъезда:</label>
+                        <input type="number" name="entrance" class="form-control form-control-sm" min="1" value="1" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Этаж:</label>
+                        <input type="number" name="floor" class="form-control form-control-sm" min="1" value="1" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Номер квартиры:</label>
+                        <input type="text" name="apartment_number" class="form-control form-control-sm" placeholder="например, 42" required>
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-success btn-sm w-100">➕ Добавить квартиру</button>
+                    </div>
+                </form>
+
+                <!-- Таблица квартир -->
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Подъезд</th>
+                                <th>Этаж</th>
+                                <th>№ Квартиры</th>
+                                <th>Жильцов</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for apt in apartments %}
+                            <tr>
+                                <td>{{ apt['id'] }}</td>
+                                <td>Подъезд №{{ apt['entrance'] }}</td>
+                                <td>{{ apt['floor'] }}-й этаж</td>
+                                <td><strong>кв. {{ apt['apartment_number'] }}</strong></td>
+                                <td>
+                                    {% if apt['resident_count'] > 0 %}
+                                        <span class="badge bg-info text-dark">{{ apt['resident_count'] }} чел.</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Пусто</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <form action="/admin/apartments/delete/{{ apt['id'] }}" method="POST" class="d-inline" onsubmit="return confirm('Вы уверены, что хотите удалить эту квартиру?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">В этом доме пока нет добавленных квартир.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
