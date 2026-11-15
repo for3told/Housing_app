@@ -145,6 +145,87 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+@app.route('/admin/users')
+def admin_users():
+    if session.get('role') != 'admin':
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # Получаем список всех пользователей, их роли и привязанные квартиры
+    cursor.execute("""
+        SELECT u.id, u.last_name, u.first_name, u.middle_name, u.username, 
+               r.role_name, a.address, a.entrance, a.apartment_number
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        LEFT JOIN apartments a ON u.apartment_id = a.id
+        ORDER BY u.id;
+    """)
+    users = cursor.fetchall()
+    
+    # Получаем список всех ролей для выпадающего списка
+    cursor.execute("SELECT * FROM roles;")
+    roles = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('admin_users.html', users=users, roles=roles)
+
+@app.route('/admin/users/update_role/<int:user_id>', methods=['POST'])
+def update_user_role(user_id):
+    if session.get('role') != 'admin':
+        return "Доступ запрещен", 403
+        
+    new_role_id = request.form['role_id']
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET role_id = %s WHERE id = %s;", (new_role_id, user_id))
+    
+    # Пишем в аудит информацию о смене роли
+    cursor.execute("""
+        INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+        VALUES (%s, %s, %s, %s, %s);
+    """, (session['user_id'], session['full_name'], "CHANGE_ROLE", f"Изменена роль для пользователя ID {user_id}", request.remote_addr))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    return redirect(url_for('admin_users'))
+
+# --- ПАНЕЛЬ АДМИНИСТРАТОРА: Просмотр квартир/домов ---
+@app.route('/admin/apartments')
+def admin_apartments():
+    if session.get('role') != 'admin':
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM apartments ORDER BY address, entrance, apartment_number;")
+    apartments = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return render_template('admin_apartments.html', apartments=apartments)
+
+# --- ПАНЕЛЬ АДМИНИСТРАТОРА: Журнал аудита безопасности ---
+@app.route('/admin/audit')
+def admin_audit():
+    if session.get('role') != 'admin':
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100;")
+    logs = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return render_template('admin_audit.html', logs=logs)
+
 @app.route('/create_poll', methods=['GET', 'POST'])
 def create_poll():
     # Проверяем, что зашел именно администратор

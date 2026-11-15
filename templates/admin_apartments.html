@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2 class="mb-4">🏢 Список домов и квартир</h2>
+        <div class="card shadow">
+            <div class="card-body">
+                <table class="table table-bordered align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>ID</th>
+                            <th>Адрес дома</th>
+                            <th>Подъезд</th>
+                            <th>№ квартиры</th>
+                            <th>Количество во жильцов</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for apt in apartments %}
+                        <tr>
+                            <td>{{ apt['id'] }}</td>
+                            <td>{{ apt['address'] }}</td>
+                            <td>{{ apt['entrance'] }}</td>
+                            <td>{{ apt['apartment_number'] }}</td>
+                            <td><span class="badge bg-info text-dark">{{ apt['resident_count'] }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <a href="/" class="btn btn-secondary mt-3">Назад на главную</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
