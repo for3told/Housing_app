@@ -44,9 +44,9 @@
 
                         <!-- ФИО пользователя -->
                         <li class="nav-item me-3">
-                            <span class="navbar-text text-light">
-                                👤 {{ session['full_name'] }} (Кв. {{ session.get('apartment', 'УК') }})
-                            </span>
+                            <a class="nav-link text-light fw-semibold" href="/profile" title="Перейти в личный кабинет">
+                                👤 {{ session['full_name'] }}
+                            </a>
                         </li>
 
                         <!-- Кнопка Выйти -->

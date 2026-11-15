@@ -60,6 +60,17 @@
                             <div id="passwordStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
                         </div>                        
                     </div>
+                    <div class="mb-3 p-3 bg-light rounded border">
+                        <div class="form-check form-switch d-flex justify-content-between align-items-center">
+                            <label class="form-check-label fw-bold" for="isOwnerSwitch">
+                                🔑 Я являюсь собственником (владельцем) этой квартиры
+                            </label>
+                            <input class="form-check-input" type="checkbox" role="switch" name="is_owner" id="isOwnerSwitch" value="true" onchange="toggleOwnerNotice()" style="width: 2.5em; height: 1.25em; cursor: pointer;">
+                        </div>
+                        <div id="ownerNotice" class="alert alert-info mt-2 mb-0 small" style="display: none;">
+                            ℹ️ Информацию о праве собственности проверит сотрудник управляющей компании. После подтверждения ваш статус в профиле обновится, и вам сообщат об этом.
+                        </div>
+                    </div>
                     <button type="submit" id="submitBtn" class="btn btn-success w-100" disabled>Зарегистрироваться</button>
                     </form>
 
@@ -131,5 +142,10 @@
                             }
                         });
                     });
+
+                    function toggleOwnerNotice() {
+                        const isChecked = document.getElementById('isOwnerSwitch').checked;
+                        document.getElementById('ownerNotice').style.display = isChecked ? 'block' : 'none';
+                    }
                     </script>
 {% endblock %}

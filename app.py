@@ -29,13 +29,49 @@ def index():
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Получаем список активных голосований
-    cursor.execute("SELECT * FROM polls WHERE is_active = TRUE ORDER BY id DESC;")
-    polls = cursor.fetchall()
+    # Автоматическое закрытие просроченных голосований
+    cursor.execute("""
+        UPDATE polls 
+        SET is_active = FALSE 
+        WHERE is_active = TRUE AND expires_at < CURRENT_TIMESTAMP;
+    """)
+    conn.commit()
     
+    user_role = session.get('role')
+    user_id = session['user_id']
+    polls = []
+    
+    if user_role in ['admin', 'dispatcher']:
+        cursor.execute("""
+            SELECT p.*, b.address as building_address 
+            FROM polls p 
+            JOIN buildings b ON p.building_id = b.id 
+            ORDER BY p.id DESC;
+        """)
+        polls = cursor.fetchall()
+    else:
+        # Безопасно проверяем, привязана ли вообще квартира к пользователю
+        cursor.execute("""
+            SELECT a.building_id 
+            FROM users u
+            JOIN apartments a ON u.apartment_id = a.id
+            WHERE u.id = %s;
+        """, (user_id,))
+        user_building = cursor.fetchone()
+        
+        # Проверяем не просто наличие объекта, а то, что он содержит building_id
+        if user_building and user_building['building_id']:
+            cursor.execute("""
+                SELECT p.*, b.address as building_address 
+                FROM polls p 
+                JOIN buildings b ON p.building_id = b.id 
+                WHERE p.building_id = %s AND p.is_active = TRUE AND p.is_closed = FALSE
+                ORDER BY p.id DESC;
+            """, (user_building['building_id'],))
+            polls = cursor.fetchall()
+            
     cursor.close()
     conn.close()
-    
     return render_template('index.html', polls=polls)
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -51,6 +87,9 @@ def register():
         username = request.form['username'].strip()
         password = request.form['password']
         apartment_id = request.form['apartment_id']
+        
+        # Получаем статус чекбокса "Я собственник" (True, если отмечен, иначе False)
+        is_owner_requested = True if request.form.get('is_owner') == 'true' else False
         
         # Бэкенд-валидация сложности пароля
         if len(password) < 6 or not re.search(r'\d', password) or not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
@@ -69,11 +108,11 @@ def register():
                 # Хэшируем пароль
                 password_hash = generate_password_hash(password)
                 
-                # Вставляем нового пользователя
+                # Вставляем нового пользователя с учетом статуса собственника
                 cursor.execute("""
-                    INSERT INTO users (last_name, first_name, middle_name, username, password_hash, apartment_id, role_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id;
-                """, (last_name, first_name, middle_name, username, password_hash, apartment_id, role_id))
+                    INSERT INTO users (last_name, first_name, middle_name, username, password_hash, apartment_id, role_id, is_owner_requested, is_owner_verified)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING id;
+                """, (last_name, first_name, middle_name, username, password_hash, apartment_id, role_id, is_owner_requested))
                 
                 new_user_id = cursor.fetchone()[0]
                 
@@ -323,7 +362,21 @@ def vote(poll_id):
         WHERE p.id = %s;
     """, (poll_id,))
     poll = cursor.fetchone()
-    
+
+    if session.get('role') not in ['admin', 'dispatcher']:
+        cursor.execute("""
+            SELECT a.building_id 
+            FROM users u
+            JOIN apartments a ON u.apartment_id = a.id
+            WHERE u.id = %s;
+        """, (user_id,))
+        user_building = cursor.fetchone()
+        
+        if not user_building or user_building['building_id'] != poll['building_id']:
+            cursor.close()
+            conn.close()
+            return "Доступ запрещен: это голосование относится к другому дому.", 403
+        
     if not poll:
         cursor.close()
         conn.close()
@@ -636,6 +689,102 @@ def delete_apartment(apartment_id):
     conn.close()
     
     return redirect(url_for('edit_building', building_id=building_id))
+#Профиль
+@app.route('/profile', methods=['GET', 'POST'])
+def profile():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+        
+    user_id = session['user_id']
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    error = None
+    success = None
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        # 1. Смена адреса / квартиры и статуса собственника
+        if action == 'update_address':
+            new_apartment_id = request.form.get('apartment_id')
+            is_owner_req = True if request.form.get('is_owner') == 'true' else False
+            
+            if not new_apartment_id:
+                error = "Выберите корректную квартиру из выпадающего списка."
+            else:
+                cursor.execute("SELECT apartment_id FROM users WHERE id = %s;", (user_id,))
+                current_apt = cursor.fetchone()['apartment_id']
+                
+                # Если квартира изменилась, сбрасываем подтверждение владельца
+                if str(current_apt) != str(new_apartment_id):
+                    cursor.execute("""
+                        UPDATE users 
+                        SET apartment_id = %s, is_owner_requested = %s, is_owner_verified = FALSE 
+                        WHERE id = %s;
+                    """, (new_apartment_id, is_owner_req, user_id))
+                else:
+                    cursor.execute("""
+                        UPDATE users 
+                        SET is_owner_requested = %s 
+                        WHERE id = %s;
+                    """, (is_owner_req, user_id))
+                
+                cursor.execute("""
+                    INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                    VALUES (%s, %s, %s, %s, %s);
+                """, (user_id, session['full_name'], "UPDATE_PROFILE", "Обновлен адрес проживания / статус владельца", request.remote_addr))
+                
+                conn.commit()
+                success = "Данные об адресе успешно обновлены!"
+                
+        # 2. Смена пароля
+        elif action == 'change_password':
+            old_password = request.form['old_password']
+            new_password = request.form['new_password']
+            
+            cursor.execute("SELECT password_hash FROM users WHERE id = %s;", (user_id,))
+            user_row = cursor.fetchone()
+            
+            if not check_password_hash(user_row['password_hash'], old_password):
+                error = "Текущий пароль введен неверно!"
+            elif len(new_password) < 6 or not re.search(r'\d', new_password) or not re.search(r'[!@#$%^&*(),.?":{}|<>]', new_password):
+                error = "Новый пароль должен содержать минимум 6 символов, цифры и спецсимволы."
+            else:
+                new_hash = generate_password_hash(new_password)
+                cursor.execute("UPDATE users SET password_hash = %s WHERE id = %s;", (new_hash, user_id))
+                
+                cursor.execute("""
+                    INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                    VALUES (%s, %s, %s, %s, %s);
+                """, (user_id, session['full_name'], "CHANGE_PASSWORD", "Пользователь сменил пароль в профиле", request.remote_addr))
+                
+                conn.commit()
+                success = "Пароль успешно изменен!"
+
+    # Получаем актуальные данные пользователя для отображения
+    cursor.execute("""
+        SELECT u.*, r.role_name, b.address, a.entrance, a.apartment_number
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        LEFT JOIN apartments a ON u.apartment_id = a.id
+        LEFT JOIN buildings b ON a.building_id = b.id
+        WHERE u.id = %s;
+    """, (user_id,))
+    user = cursor.fetchone()
+    
+    # Список квартир для формы смены адреса
+    cursor.execute("""
+        SELECT a.id, b.address, a.entrance, a.apartment_number 
+        FROM apartments a
+        JOIN buildings b ON a.building_id = b.id
+        ORDER BY b.address, a.entrance, a.apartment_number;
+    """)
+    apartments = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    return render_template('profile.html', user=user, apartments=apartments, error=error, success=success)
 
 if __name__ == '__main__':
     app.run(debug=True)

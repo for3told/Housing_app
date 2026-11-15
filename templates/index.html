@@ -3,30 +3,42 @@
 <div class="row">
     <div class="col-md-12">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>Активные голосования</h2>
-            {% if session['role'] == 'admin' %}
+            <h2>📋 Активные голосования</h2>
+            {% if session.get('role') in ['admin', 'dispatcher'] %}
                 <a href="/create_poll" class="btn btn-primary">➕ Создать новое голосование</a>
             {% endif %}
         </div>
-        
-        {% if polls %}
-            <div class="row">
-                {% for poll in polls %}
-                <div class="col-md-6 mb-4">
+
+        <div class="row">
+            {% for poll in polls %}
+                <div class="col-md-6 mb-3">
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h5 class="card-title text-primary">{{ poll['title'] }}</h5>
-                            <p class="card-text text-muted">{{ poll['description'] }}</p>
-                            <hr>
-                            <a href="/vote/{{ poll['id'] }}" class="btn btn-outline-success btn-sm">Перейти к голосованию</a>
+                            <p class="card-text text-muted small mb-2">{{ poll['description'] or 'Нет описания' }}</p>
+                            <p class="text-secondary small mb-1">📍 Дом: <strong>{{ poll['building_address'] }}</strong></p>
+                            <p class="text-secondary small mb-3">
+                                {% if poll['is_anonymous'] %}
+                                    <span class="badge bg-secondary">🥷 Анонимное</span>
+                                {% else %}
+                                    <span class="badge bg-info text-dark">🌐 Публичное</span>
+                                {% endif %}
+                                {% if poll['is_active'] and not poll['is_closed'] %}
+                                    <span class="badge bg-success">Активно до: {{ poll['expires_at'].strftime('%d.%m.%Y %H:%M') }}</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Завершено / Закрыто</span>
+                                {% endif %}
+                            </p>
+                            <a href="/vote/{{ poll['id'] }}" class="btn btn-outline-primary btn-sm">Перейти к голосованию</a>
                         </div>
                     </div>
                 </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="alert alert-warning">Активных голосований пока нет.</div>
-        {% endif %}
+            {% else %}
+                <div class="col-md-12">
+                    <div class="alert alert-secondary text-center">Для вашего дома пока нет активных голосований.</div>
+                </div>
+            {% endfor %}
+        </div>
     </div>
 </div>
 {% endblock %}
