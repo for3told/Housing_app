@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h3 class="card-title text-center mb-4">📝 Регистрация жильца</h3>
+                
+                {% if error %}
+                    <div class="alert alert-danger" role="alert">{{ error }}</div>
+                {% endif %}
+
+                <form method="POST" id="registerForm">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Фамилия:</label>
+                            <input type="text" name="last_name" class="form-control" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Имя:</label>
+                            <input type="text" name="first_name" class="form-control" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Отчество:</label>
+                            <input type="text" name="middle_name" class="form-control">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Логин:</label>
+                        <input type="text" name="username" class="form-control" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Выберите вашу квартиру (Адрес, подъезд, №):</label>
+                        <select name="apartment_id" class="form-select" required>
+                            <option value="" disabled selected>-- Выберите квартиру --</option>
+                            {% for apt in apartments %}
+                                <option value="{{ apt['id'] }}">
+                                    {{ apt['address'] }} | Подъезд №{{ apt['entrance'] }} | Кв. {{ apt['apartment_number'] }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Пароль:</label>
+                        <input type="password" name="password" id="passwordInput" class="form-control" required>
+                        <!-- Индикатор сложности пароля -->
+                        <div class="form-text mt-1" id="passwordHelp">
+                            Требования: не менее 6 символов, обязательно цифры и специальные символы (!@#$%^&*...).
+                        </div>
+                        <div class="progress mt-2" style="height: 6px;">
+                            <div id="passwordStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="btn btn-success w-100" disabled>Зарегистрироваться</button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <a href="/login" class="text-decoration-none">Уже есть аккаунт? Войти</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript для проверки сложности пароля в реальном времени -->
+<script>
+const passwordInput = document.getElementById('passwordInput');
+const strengthBar = document.getElementById('passwordStrengthBar');
+const passwordHelp = document.getElementById('passwordHelp');
+const submitBtn = document.getElementById('submitBtn');
+
+passwordInput.addEventListener('input', function() {
+    const val = passwordInput.value;
+    let score = 0;
+    
+    // Проверки условий
+    const hasLength = val.length >= 6;
+    const hasNumber = /\d/.test(val);
+    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(val);
+    
+    if (hasLength) score += 1;
+    if (hasNumber) score += 1;
+    if (hasSpecial) score += 1;
+    
+    // Визуальное отображение
+    if (val.length === 0) {
+        strengthBar.style.width = '0%';
+        strengthBar.className = 'progress-bar';
+        passwordHelp.textContent = "Требования: не менее 6 символов, обязательно цифры и специальные символы.";
+        submitBtn.disabled = true;
+    } else if (score === 1) {
+        strengthBar.style.width = '33%';
+        strengthBar.className = 'progress-bar bg-danger';
+        passwordHelp.textContent = "Слабый пароль (добавьте цифры/спецсимволы)";
+        submitBtn.disabled = true;
+    } else if (score === 2) {
+        strengthBar.style.width = '66%';
+        strengthBar.className = 'progress-bar bg-warning';
+        passwordHelp.textContent = "Средний пароль";
+        submitBtn.disabled = true;
+    } else if (score === 3) {
+        strengthBar.style.width = '100%';
+        strengthBar.className = 'progress-bar bg-success';
+        passwordHelp.textContent = "Надежный пароль!";
+        submitBtn.disabled = false; // Разрешаем регистрацию
+    }
+});
+</script>
+{% endblock %}
