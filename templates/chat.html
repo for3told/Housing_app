@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <!-- Левая колонка: Список чатов и пользователей -->
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-dark text-white fw-bold">💬 Сообщения и чаты</div>
+            <div class="card-body p-2 d-flex flex-column" style="max-height: 75vh; overflow-y: auto;">
+                
+                <!-- Общедомовые чаты -->
+                <div class="text-muted small fw-bold px-2 mt-1 mb-1">ОБЩЕДОМОВЫЕ ЧАТЫ</div>
+                <div class="list-group list-group-flush mb-3">
+                    {% for b in available_buildings %}
+                        <a href="/chat?building_id={{ b['id'] }}" 
+                           class="list-group-item list-group-item-action rounded mb-1 {% if chat_type == 'building' and target_id == b['id'] %}active{% endif %}">
+                            🏢 {{ b['address'] }}
+                        </a>
+                    {% else %}
+                        <div class="text-muted small px-2">Нет доступных домовых чатов</div>
+                    {% endfor %}
+                </div>
+
+                <!-- Поиск и список пользователей для личных сообщений -->
+                <div class="text-muted small fw-bold px-2 mb-1">ЛИЧНЫЕ СООБЩЕНИЯ</div>
+                <div class="px-1 mb-2">
+                    <input type="text" id="userSearchInput" class="form-control form-control-sm" placeholder="🔍 Поиск по ФИО или адресу...">
+                </div>
+                
+                <div class="list-group list-group-flush" id="usersChatList">
+                    {% for u in all_users %}
+                        <a href="/chat?user_id={{ u['id'] }}" 
+                           class="list-group-item list-group-item-action rounded mb-1 user-chat-item {% if chat_type == 'direct' and target_id == u['id'] %}active{% endif %}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-semibold">{{ u['last_name'] }} {{ u['first_name'] }}</span>
+                                {% if u['role_name'] in ['admin', 'dispatcher'] %}
+                                    <span class="badge bg-warning text-dark" style="font-size: 0.7em;">УК</span>
+                                {% endif %}
+                            </div>
+                            <div class="small {% if chat_type == 'direct' and target_id == u['id'] %}text-light{% else %}text-muted{% endif %}" style="font-size: 0.8em;">
+                                {% if u['address'] %}
+                                    {{ u['address'] }}, кв. {{ u['apartment_number'] }}
+                                {% else %}
+                                    Сотрудник управляющей компании
+                                {% endif %}
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка: Окно диалога -->
+    <div class="col-md-8 mb-3">
+        <div class="card shadow-sm d-flex flex-column" style="height: 75vh;">
+            <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
+                <span>{{ chat_title }}</span>
+            </div>
+
+            <!-- История сообщений -->
+            <div class="card-body p-3" id="chatMessagesBox" style="overflow-y: auto; flex-grow: 1; background-color: #f8f9fa;">
+                {% if target_id %}
+                    {% for msg in messages %}
+                        {% set is_mine = (msg['sender_id'] == session['user_id']) %}
+                        <div class="d-flex flex-column mb-3 {% if is_mine %}align-items-end{% else %}align-items-start{% endif %}">
+                            
+                            <!-- Имя отправителя и метаданные -->
+                            <div class="small text-muted mb-1">
+                                {% if not is_mine %}
+                                    <strong>{{ msg['last_name'] }} {{ msg['first_name'] }}</strong>
+                                    {% if msg['role_name'] in ['admin', 'dispatcher'] %}
+                                        <span class="badge bg-warning text-dark">Сотрудник УК</span>
+                                    {% elif msg['apartment_number'] %}
+                                        <span>(кв. {{ msg['apartment_number'] }})</span>
+                                    {% endif %}
+                                    •
+                                {% endif %}
+                                <span>{{ msg['created_at'].strftime('%d.%m %H:%M') }}</span>
+                                {% if msg['is_edited'] %}
+                                    <span class="fst-italic text-secondary">(изменено)</span>
+                                {% endif %}
+                            </div>
+
+                            <!-- Пузырь сообщения -->
+                            <div class="p-3 rounded-3 shadow-sm {% if is_mine %}bg-primary text-white{% else %}bg-white border text-dark{% endif %}" style="max-width: 75%; word-wrap: break-word;">
+                                <div id="msg-text-{{ msg['id'] }}" style="white-space: pre-wrap;">{{ msg['content'] }}</div>
+                                
+                                <!-- Кнопки управления сообщением -->
+                                {% set can_edit = is_mine %}
+                                {% set can_delete = is_mine or (chat_type == 'building' and session.get('role') in ['admin', 'dispatcher']) %}
+                                
+                                {% if can_edit or can_delete %}
+                                    <div class="mt-2 pt-1 border-top {% if is_mine %}border-light border-opacity-25{% else %}border-secondary border-opacity-25{% endif %} d-flex justify-content-end gap-2">
+                                        {% if can_edit %}
+                                        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none {% if is_mine %}text-white-50{% else %}text-muted{% endif %}" 
+                                                data-msg-id="{{ msg['id'] }}" onclick="openEditModal(this)" title="Редактировать">
+                                            ✏️
+                                        </button>
+                                        {% endif %}
+                                        {% if can_delete %}
+                                            <form action="/chat/delete/{{ msg['id'] }}" method="POST" class="d-inline" onsubmit="return confirm('Удалить это сообщение?');">
+                                                <button type="submit" class="btn btn-link btn-sm p-0 text-decoration-none {% if is_mine %}text-white-50{% else %}text-danger{% endif %}" title="Удалить">
+                                                    🗑️
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted my-5">
+                            Сообщений пока нет. Напишите первым!
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted my-5">
+                        Выберите чат дома или собеседника в меню слева.
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Форма отправки нового сообщения -->
+            {% if target_id %}
+                <div class="card-footer bg-white p-2">
+                    <form action="/chat/send" method="POST" class="d-flex gap-2">
+                        <input type="hidden" name="chat_type" value="{{ chat_type }}">
+                        <input type="hidden" name="target_id" value="{{ target_id }}">
+                        <input type="text" name="content" class="form-control" placeholder="Введите сообщение..." autocomplete="off" required>
+                        <button type="submit" class="btn btn-primary px-4">Отправить</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования сообщения -->
+<div class="modal fade" id="editMessageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="editMessageForm" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">✏️ Редактирование сообщения</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <textarea name="content" id="editMessageTextarea" class="form-control" rows="3" required></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Автоматическая прокрутка чата в самый низ при открытии
+document.addEventListener('DOMContentLoaded', function() {
+    const chatBox = document.getElementById('chatMessagesBox');
+    if (chatBox) {
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+});
+
+// Живой поиск пользователей в левой панели
+document.getElementById('userSearchInput').addEventListener('input', function(e) {
+    const query = e.target.value.toLowerCase();
+    const items = document.querySelectorAll('.user-chat-item');
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(query) ? 'block' : 'none';
+    });
+});
+
+// Открытие модального окна редактирования с подстановкой текста
+function openEditModal(buttonElement) {
+    const messageId = buttonElement.getAttribute('data-msg-id');
+    const textElement = document.getElementById('msg-text-' + messageId);
+    const form = document.getElementById('editMessageForm');
+    const textarea = document.getElementById('editMessageTextarea');
+    
+    textarea.value = textElement.textContent;
+    form.action = '/chat/edit/' + messageId;
+    
+    const modal = new bootstrap.Modal(document.getElementById('editMessageModal'));
+    modal.show();
+}
+</script>
+{% endblock %}

@@ -784,5 +784,279 @@ def profile():
     conn.close()
     return render_template('profile.html', user=user, apartments=apartments, error=error, success=success)
 
+
+# --- МОДУЛЬ ЧАТА (ОБЩЕДОМОВЫЕ И ЛИЧНЫЕ СООБЩЕНИЯ) ---
+
+@app.route('/chat')
+def chat():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+        
+    user_id = session['user_id']
+    user_role = session.get('role')
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # 1. Получаем доступные пользователю общедомовые чаты
+    if user_role in ['admin', 'dispatcher']:
+        # Сотрудники УК видят чаты всех домов
+        cursor.execute("SELECT id, address FROM buildings ORDER BY address;")
+        available_buildings = cursor.fetchall()
+    else:
+        # Жилец видит только чат своего дома
+        cursor.execute("""
+            SELECT b.id, b.address 
+            FROM users u
+            JOIN apartments a ON u.apartment_id = a.id
+            JOIN buildings b ON a.building_id = b.id
+            WHERE u.id = %s;
+        """, (user_id,))
+        available_buildings = cursor.fetchall()
+
+    # 2. Получаем список всех пользователей для личных сообщений (кроме самого себя)
+    cursor.execute("""
+        SELECT u.id, u.last_name, u.first_name, r.role_name, b.address, a.apartment_number
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        LEFT JOIN apartments a ON u.apartment_id = a.id
+        LEFT JOIN buildings b ON a.building_id = b.id
+        WHERE u.id != %s
+        ORDER BY r.id, u.last_name, u.first_name;
+    """, (user_id,))
+    all_users = cursor.fetchall()
+
+    # 3. Определяем, какой чат сейчас открыт (дом или личка)
+    selected_building_id = request.args.get('building_id', type=int)
+    selected_user_id = request.args.get('user_id', type=int)
+    
+    # Если ничего не выбрано, открываем первый доступный домовой чат (если есть)
+    if not selected_building_id and not selected_user_id and available_buildings:
+        selected_building_id = available_buildings[0]['id']
+
+    messages = []
+    chat_title = "Выберите чат из списка слева"
+    chat_type = None
+    target_id = None
+
+    # Загружаем историю общедомового чата
+    if selected_building_id:
+        # Проверяем, имеет ли жилец доступ к этому дому
+        allowed_ids = [b['id'] for b in available_buildings]
+        if selected_building_id not in allowed_ids:
+            cursor.close()
+            conn.close()
+            return "Доступ к чату этого дома запрещен", 403
+            
+        chat_type = 'building'
+        target_id = selected_building_id
+        
+        cursor.execute("SELECT address FROM buildings WHERE id = %s;", (selected_building_id,))
+        b_row = cursor.fetchone()
+        chat_title = f"🏢 Общий чат дома: {b_row['address']}" if b_row else "Чат дома"
+        
+        cursor.execute("""
+            SELECT m.*, u.last_name, u.first_name, r.role_name, a.apartment_number
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN apartments a ON u.apartment_id = a.id
+            WHERE m.building_id = %s
+            ORDER BY m.created_at ASC;
+        """, (selected_building_id,))
+        messages = cursor.fetchall()
+
+    # Загружаем историю личной переписки
+    elif selected_user_id:
+        chat_type = 'direct'
+        target_id = selected_user_id
+        
+        cursor.execute("""
+            SELECT u.last_name, u.first_name, r.role_name, b.address, a.apartment_number
+            FROM users u
+            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN apartments a ON u.apartment_id = a.id
+            LEFT JOIN buildings b ON a.building_id = b.id
+            WHERE u.id = %s;
+        """, (selected_user_id,))
+        u_row = cursor.fetchone()
+        
+        if not u_row:
+            cursor.close()
+            conn.close()
+            return "Пользователь не найден", 404
+            
+        info = f" ({u_row['address']}, кв. {u_row['apartment_number']})" if u_row['address'] else " (Сотрудник УК)"
+        chat_title = f"💬 Диалог: {u_row['last_name']} {u_row['first_name']}{info}"
+        
+        cursor.execute("""
+            SELECT m.*, u.last_name, u.first_name, r.role_name, a.apartment_number
+            FROM messages m
+            JOIN users u ON m.sender_id = u.id
+            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN apartments a ON u.apartment_id = a.id
+            WHERE (m.sender_id = %s AND m.recipient_id = %s)
+               OR (m.sender_id = %s AND m.recipient_id = %s)
+            ORDER BY m.created_at ASC;
+        """, (user_id, selected_user_id, selected_user_id, user_id))
+        messages = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    
+    return render_template('chat.html', 
+                           available_buildings=available_buildings,
+                           all_users=all_users,
+                           messages=messages,
+                           chat_title=chat_title,
+                           chat_type=chat_type,
+                           target_id=target_id)
+
+
+@app.route('/chat/send', methods=['POST'])
+def send_message():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+        
+    user_id = session['user_id']
+    user_role = session.get('role')
+    chat_type = request.form.get('chat_type')
+    target_id = request.form.get('target_id', type=int)
+    content = request.form.get('content', '').strip()
+    
+    if not content or not target_id or chat_type not in ['building', 'direct']:
+        return redirect(url_for('chat'))
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    if chat_type == 'building':
+        # Проверка прав на отправку в чат дома
+        if user_role not in ['admin', 'dispatcher']:
+            cursor.execute("""
+                SELECT a.building_id FROM users u
+                JOIN apartments a ON u.apartment_id = a.id
+                WHERE u.id = %s;
+            """, (user_id,))
+            row = cursor.fetchone()
+            if not row or row['building_id'] != target_id:
+                cursor.close()
+                conn.close()
+                return "Доступ запрещен", 403
+                
+        cursor.execute("""
+            INSERT INTO messages (sender_id, building_id, content)
+            VALUES (%s, %s, %s);
+        """, (user_id, target_id, content))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('chat', building_id=target_id))
+        
+    else: # direct
+        cursor.execute("""
+            INSERT INTO messages (sender_id, recipient_id, content)
+            VALUES (%s, %s, %s);
+        """, (user_id, target_id, content))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('chat', user_id=target_id))
+
+
+@app.route('/chat/edit/<int:message_id>', methods=['POST'])
+def edit_message(message_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+        
+    user_id = session['user_id']
+    new_content = request.form.get('content', '').strip()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cursor.execute("SELECT * FROM messages WHERE id = %s;", (message_id,))
+    msg = cursor.fetchone()
+    
+    if not msg:
+        cursor.close()
+        conn.close()
+        return "Сообщение не найдено", 404
+        
+    # Редактировать может ТОЛЬКО автор сообщения
+    if msg['sender_id'] != user_id:
+        cursor.close()
+        conn.close()
+        return "Доступ запрещен: вы можете редактировать только свои сообщения.", 403
+        
+    if new_content and new_content != msg['content']:
+        cursor.execute("""
+            UPDATE messages 
+            SET content = %s, is_edited = TRUE 
+            WHERE id = %s;
+        """, (new_content, message_id))
+        conn.commit()
+        
+    cursor.close()
+    conn.close()
+    
+    if msg['building_id']:
+        return redirect(url_for('chat', building_id=msg['building_id']))
+    else:
+        other_user = msg['recipient_id']
+        return redirect(url_for('chat', user_id=other_user))
+
+
+@app.route('/chat/delete/<int:message_id>', methods=['POST'])
+def delete_message(message_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+        
+    user_id = session['user_id']
+    user_role = session.get('role')
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cursor.execute("SELECT * FROM messages WHERE id = %s;", (message_id,))
+    msg = cursor.fetchone()
+    
+    if not msg:
+        cursor.close()
+        conn.close()
+        return "Сообщение не найдено", 404
+        
+    # Проверка прав на удаление
+    can_delete = False
+    if msg['sender_id'] == user_id:
+        can_delete = True
+    elif msg['building_id'] is not None and user_role in ['admin', 'dispatcher']:
+        # В общедомовом чате админ и диспетчер могут удалять любые сообщения
+        can_delete = True
+        
+    if not can_delete:
+        cursor.close()
+        conn.close()
+        return "Доступ запрещен: недостаточно прав для удаления сообщения.", 403
+        
+    cursor.execute("DELETE FROM messages WHERE id = %s;", (message_id,))
+    
+    # Если модератор удалил чужое сообщение в общем чате — фиксируем в аудит
+    if msg['sender_id'] != user_id:
+        cursor.execute("""
+            INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (user_id, session['full_name'], "DELETE_MESSAGE", f"Удалено сообщение ID {message_id} в чате дома ID {msg['building_id']}", request.remote_addr))
+        
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    if msg['building_id']:
+        return redirect(url_for('chat', building_id=msg['building_id']))
+    else:
+        other_user = msg['recipient_id'] if msg['sender_id'] == user_id else msg['sender_id']
+        return redirect(url_for('chat', user_id=other_user))
+    
 if __name__ == '__main__':
     app.run(debug=True)
