@@ -159,13 +159,14 @@ def admin_users():
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Получаем список всех пользователей, их роли и привязанные квартиры
+    # Делаем JOIN с таблицей buildings через apartments, чтобы получить address
     cursor.execute("""
         SELECT u.id, u.last_name, u.first_name, u.middle_name, u.username, 
-               r.role_name, a.address, a.entrance, a.apartment_number
+               r.role_name, b.address, a.entrance, a.apartment_number
         FROM users u
         JOIN roles r ON u.role_id = r.id
         LEFT JOIN apartments a ON u.apartment_id = a.id
+        LEFT JOIN buildings b ON a.building_id = b.id
         ORDER BY u.id;
     """)
     users = cursor.fetchall()
@@ -202,15 +203,22 @@ def update_user_role(user_id):
     
     return redirect(url_for('admin_users'))
 
-# --- ПАНЕЛЬ АДМИНИСТРАТОРА: Просмотр квартир/домов ---
+# --- ПАНЕЛЬ АДМИНИСТРАТОРА: Просмотр всех квартир ---
 @app.route('/admin/apartments')
 def admin_apartments():
-    if session.get('role') != 'admin':
+    if session.get('role') not in ['admin', 'dispatcher']:
         return "Доступ запрещен", 403
         
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("SELECT * FROM apartments ORDER BY address, entrance, apartment_number;")
+    
+    # Делаем JOIN с buildings, чтобы получить адрес и правильно отсортировать
+    cursor.execute("""
+        SELECT a.*, b.address 
+        FROM apartments a
+        JOIN buildings b ON a.building_id = b.id
+        ORDER BY b.address, a.entrance, a.apartment_number;
+    """)
     apartments = cursor.fetchall()
     cursor.close()
     conn.close()
@@ -514,6 +522,51 @@ def add_apartment_manual(building_id):
         
     cursor.close()
     conn.close()
+    return redirect(url_for('edit_building', building_id=building_id))
+
+@app.route('/admin/apartments/delete/<int:apartment_id>', methods=['POST'])
+def delete_apartment(apartment_id):
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # 1. Получаем квартиру и узнаем ее building_id
+    cursor.execute("SELECT * FROM apartments WHERE id = %s;", (apartment_id,))
+    apt = cursor.fetchone()
+    
+    if not apt:
+        cursor.close()
+        conn.close()
+        return "Квартира не найдена", 404
+        
+    building_id = apt['building_id']
+    
+    # 2. Проверяем, есть ли жильцы
+    cursor.execute("SELECT COUNT(*) as count FROM users WHERE apartment_id = %s;", (apartment_id,))
+    users_in_apt = cursor.fetchone()['count']
+    
+    if apt['resident_count'] > 0 or users_in_apt > 0:
+        cursor.close()
+        conn.close()
+        session['apt_delete_error'] = f"Невозможно удалить кв. {apt['apartment_number']}: в ней зарегистрированы жильцы ({users_in_apt} чел.). Сначала удалите жильцов или смените их адрес!"
+        return redirect(url_for('edit_building', building_id=building_id))
+        
+    # 3. Если жильцов нет — удаляем квартиру
+    cursor.execute("DELETE FROM apartments WHERE id = %s;", (apartment_id,))
+    
+    # Обновляем общее число квартир в здании
+    cursor.execute("""
+        UPDATE buildings 
+        SET apartments_count = (SELECT COUNT(*) FROM apartments WHERE building_id = %s)
+        WHERE id = %s;
+    """, (building_id, building_id))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
     return redirect(url_for('edit_building', building_id=building_id))
 
 if __name__ == '__main__':

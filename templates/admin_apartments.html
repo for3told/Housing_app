@@ -2,31 +2,41 @@
 {% block content %}
 <div class="row">
     <div class="col-md-12">
-        <h2 class="mb-4">🏢 Список домов и квартир</h2>
+        <h2 class="mb-4">🚪 Список всех квартир в системе</h2>
         <div class="card shadow">
             <div class="card-body">
-                <table class="table table-bordered align-middle">
-                    <thead class="table-dark">
-                        <tr>
-                            <th>ID</th>
-                            <th>Адрес дома</th>
-                            <th>Подъезд</th>
-                            <th>№ квартиры</th>
-                            <th>Количество во жильцов</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for apt in apartments %}
-                        <tr>
-                            <td>{{ apt['id'] }}</td>
-                            <td>{{ apt['address'] }}</td>
-                            <td>{{ apt['entrance'] }}</td>
-                            <td>{{ apt['apartment_number'] }}</td>
-                            <td><span class="badge bg-info text-dark">{{ apt['resident_count'] }}</span></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>ID</th>
+                                <th>Адрес здания</th>
+                                <th>Подъезд</th>
+                                <th>Этаж</th>
+                                <th>№ Квартиры</th>
+                                <th>Жильцов</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for apt in apartments %}
+                            <tr>
+                                <td>{{ apt['id'] }}</td>
+                                <td><strong>{{ apt['address'] }}</strong></td>
+                                <td>Подъезд №{{ apt['entrance'] }}</td>
+                                <td>{{ apt['floor'] }}-й</td>
+                                <td>кв. {{ apt['apartment_number'] }}</td>
+                                <td>
+                                    {% if apt['resident_count'] > 0 %}
+                                        <span class="badge bg-info text-dark">{{ apt['resident_count'] }} чел.</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Пусто</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
                 <a href="/" class="btn btn-secondary mt-3">Назад на главную</a>
             </div>
         </div>
