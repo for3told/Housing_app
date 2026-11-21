@@ -79,16 +79,23 @@ def register():
     error = None
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     if request.method == 'POST':
-        last_name = request.form['last_name'].strip()
-        first_name = request.form['first_name'].strip()
-        middle_name = request.form.get('middle_name', '').strip()
-        username = request.form['username'].strip()
-        password = request.form['password']
-        apartment_id = request.form['apartment_id']
-        
-        # Получаем статус чекбокса "Я собственник" (True, если отмечен, иначе False)
+        last_name = request.form.get('last_name', '').strip()
+        first_name = request.form.get('first_name', '').strip()
+        no_middle_name = request.form.get('no_middle_name') == '1'
+        raw_middle = request.form.get('middle_name', '')
+
+        if no_middle_name or not raw_middle.strip():
+            middle_name = ' '
+        else:
+            middle_name = raw_middle.strip()
+
+        full_name = " ".join(part for part in [last_name, first_name, middle_name.strip()] if part)
+
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        apartment_id = request.form.get('apartment_id')
         is_owner_requested = True if request.form.get('is_owner') == 'true' else False
         
         # Бэкенд-валидация сложности пароля
@@ -194,12 +201,13 @@ def logout():
 def admin_users():
     if session.get('role') not in ['admin', 'dispatcher']:
         return "Доступ запрещен", 403
-        
+
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     cursor.execute("""
-        SELECT u.id, u.last_name, u.first_name, u.middle_name, u.username, 
+        SELECT u.id, u.last_name, u.first_name, u.middle_name, u.username,
+               u.is_owner_requested, u.is_owner_verified,
                r.role_name, b.address, a.entrance, a.apartment_number
         FROM users u
         JOIN roles r ON u.role_id = r.id
@@ -208,14 +216,61 @@ def admin_users():
         ORDER BY u.id;
     """)
     users = cursor.fetchall()
-    
-    cursor.execute("SELECT * FROM roles;")
+
+    cursor.execute("SELECT * FROM roles ORDER BY id;")
     roles = cursor.fetchall()
-    
+
     cursor.close()
     conn.close()
-    
+
     return render_template('admin_users.html', users=users, roles=roles)
+
+
+@app.route('/admin/users/delete/<int:user_id>', methods=['POST'])
+def delete_user(user_id):
+    if session.get('role') != 'admin':
+        return "Доступ запрещен: удалять пользователей может только администратор.", 403
+
+    if user_id == session.get('user_id'):
+        return "Нельзя удалить собственного пользователя во время активной сессии.", 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cursor.execute("SELECT id, last_name, first_name, middle_name, username FROM users WHERE id = %s;", (user_id,))
+    target_user = cursor.fetchone()
+
+    if not target_user:
+        cursor.close()
+        conn.close()
+        return "Пользователь не найден", 404
+
+    deleted_fio = " ".join(
+        part for part in [
+            target_user['last_name'] or '',
+            target_user['first_name'] or '',
+            (target_user['middle_name'] or '').strip()
+        ] if part
+    )
+
+    cursor.execute("DELETE FROM users WHERE id = %s;", (user_id,))
+
+    cursor.execute("""
+        INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+        VALUES (%s, %s, %s, %s, %s);
+    """, (
+        session['user_id'],
+        session['full_name'],
+        "DELETE_USER",
+        f"Удален пользователь {deleted_fio} (логин: {target_user['username']}, ID {user_id})",
+        request.remote_addr
+    ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return redirect(url_for('admin_users'))
 
 @app.route('/admin/users/update_role/<int:user_id>', methods=['POST'])
 def update_user_role(user_id):
@@ -1057,6 +1112,69 @@ def delete_message(message_id):
     else:
         other_user = msg['recipient_id'] if msg['sender_id'] == user_id else msg['sender_id']
         return redirect(url_for('chat', user_id=other_user))
+
+@app.route('/admin/users/owner/<int:user_id>/<decision>', methods=['POST'])
+def process_owner_request(user_id, decision):
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен", 403
+
+    if decision not in ['approve', 'reject']:
+        return "Некорректное действие", 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cursor.execute("""
+        SELECT u.id, u.last_name, u.first_name, u.middle_name, u.is_owner_requested,
+               b.address, a.apartment_number
+        FROM users u
+        LEFT JOIN apartments a ON u.apartment_id = a.id
+        LEFT JOIN buildings b ON a.building_id = b.id
+        WHERE u.id = %s;
+    """, (user_id,))
+    target_user = cursor.fetchone()
+
+    if not target_user:
+        cursor.close()
+        conn.close()
+        return "Пользователь не найден", 404
+
+    target_fio = " ".join(
+        part for part in [
+            target_user['last_name'] or '',
+            target_user['first_name'] or '',
+            (target_user['middle_name'] or '').strip()
+        ] if part
+    )
+    apt_info = f"{target_user['address']}, кв. {target_user['apartment_number']}" if target_user['address'] else "без адреса"
+
+    if decision == 'approve':
+        cursor.execute("""
+            UPDATE users
+            SET is_owner_verified = TRUE, is_owner_requested = FALSE
+            WHERE id = %s;
+        """, (user_id,))
+        action_type = "OWNER_REQUEST_APPROVED"
+        description = f"Одобрена заявка на статус собственника для {target_fio} (ID {user_id}, {apt_info})"
+    else:
+        cursor.execute("""
+            UPDATE users
+            SET is_owner_verified = FALSE, is_owner_requested = FALSE
+            WHERE id = %s;
+        """, (user_id,))
+        action_type = "OWNER_REQUEST_REJECTED"
+        description = f"Отклонена заявка на статус собственника для {target_fio} (ID {user_id}, {apt_info})"
+
+    cursor.execute("""
+        INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+        VALUES (%s, %s, %s, %s, %s);
+    """, (session['user_id'], session['full_name'], action_type, description, request.remote_addr))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return redirect(url_for('admin_users'))
     
 if __name__ == '__main__':
     app.run(debug=True)

@@ -11,20 +11,26 @@
                 {% endif %}
 
                 <form method="POST" id="registerForm">
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Фамилия:</label>
-                            <input type="text" name="last_name" class="form-control" required>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Имя:</label>
-                            <input type="text" name="first_name" class="form-control" required>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Отчество:</label>
-                            <input type="text" name="middle_name" class="form-control">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Фамилия:</label>
+                        <input type="text" name="last_name" class="form-control" required>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Имя:</label>
+                        <input type="text" name="first_name" class="form-control" required>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Отчество:</label>
+                        <input type="text" name="middle_name" id="middleNameInput" class="form-control">
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" name="no_middle_name" id="noMiddleNameCheck" value="1" onchange="toggleMiddleName()">
+                            <label class="form-check-label small text-muted" for="noMiddleNameCheck">
+                                Нет отчества
+                            </label>
                         </div>
                     </div>
+                </div>
 
                     <div class="mb-3">
                         <label class="form-label">Логин:</label>
@@ -146,6 +152,23 @@
                     function toggleOwnerNotice() {
                         const isChecked = document.getElementById('isOwnerSwitch').checked;
                         document.getElementById('ownerNotice').style.display = isChecked ? 'block' : 'none';
+                    }
+
+                    function toggleMiddleName() {
+                        const checkbox = document.getElementById('noMiddleNameCheck');
+                        const input = document.getElementById('middleNameInput');
+                        if (checkbox.checked) {
+                            input.value = ' ';
+                            input.readOnly = true;
+                            input.required = false;
+                            input.classList.add('bg-light', 'text-muted');
+                        } else {
+                            if (input.value === ' ') {
+                                input.value = '';
+                            }
+                            input.readOnly = false;
+                            input.classList.remove('bg-light', 'text-muted');
+                        }
                     }
                     </script>
 {% endblock %}

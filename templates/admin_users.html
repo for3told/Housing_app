@@ -14,8 +14,9 @@
                                 <th>Логин</th>
                                 <th>Роль</th>
                                 <th>Адрес / Квартира</th>
-                                {% if session.get('role') == 'admin' %}
-                                    <th>Действия (Изменение роли)</th>
+                                <th>Собственность / Заявка</th>
+                                {% if session.get('role') in ['admin', 'dispatcher'] %}
+                                    <th>Действия</th>
                                 {% endif %}
                             </tr>
                         </thead>
@@ -23,7 +24,14 @@
                             {% for u in users %}
                             <tr>
                                 <td>{{ u['id'] }}</td>
-                                <td><strong>{{ u['last_name'] }} {{ u['first_name'] }} {{ u['middle_name'] or '' }}</strong></td>
+                                <td>
+                                    <strong>
+                                        {{ u['last_name'] }} {{ u['first_name'] }}
+                                        {% if u['middle_name'] and u['middle_name'].strip() %}
+                                            {{ u['middle_name'].strip() }}
+                                        {% endif %}
+                                    </strong>
+                                </td>
                                 <td><code>{{ u['username'] }}</code></td>
                                 <td>
                                     <span class="badge bg-secondary">{{ u['role_name'] }}</span>
@@ -35,20 +43,56 @@
                                         <span class="text-muted">Не привязан</span>
                                     {% endif %}
                                 </td>
-                                
-                                <!-- Управление ролями доступно ТОЛЬКО администратору -->
-                                {% if session.get('role') == 'admin' %}
                                 <td>
-                                    <form action="/admin/users/update_role/{{ u['id'] }}" method="POST" class="d-flex align-items-center gap-2">
-                                        <select name="role_id" class="form-select form-select-sm">
-                                            {% for r in roles %}
-                                                <option value="{{ r['id'] }}" {% if r['role_name'] == u['role_name'] %}selected{% endif %}>
-                                                    {{ r['description'] }}
-                                                </option>
-                                            {% endfor %}
-                                        </select>
-                                        <button type="submit" class="btn btn-sm btn-outline-primary">Изменить</button>
-                                    </form>
+                                    {% if u['is_owner_verified'] %}
+                                        <span class="badge bg-success">✅ Собственник</span>
+                                    {% elif u['is_owner_requested'] %}
+                                        <span class="badge bg-warning text-dark">⏳ Заявка на собственника</span>
+                                    {% else %}
+                                        <span class="badge bg-light text-dark border">Жилец</span>
+                                    {% endif %}
+                                </td>
+
+                                {% if session.get('role') in ['admin', 'dispatcher'] %}
+                                <td>
+                                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                                        <!-- Одобрение / отклонение заявки на собственника (диспетчер и админ) -->
+                                        {% if u['is_owner_requested'] %}
+                                            <form action="/admin/users/owner/{{ u['id'] }}/approve" method="POST" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-success" title="Подтвердить статус собственника">
+                                                    ✔ Одобрить
+                                                </button>
+                                            </form>
+                                            <form action="/admin/users/owner/{{ u['id'] }}/reject" method="POST" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-outline-warning text-dark" title="Отклонить заявку">
+                                                    ✖ Отклонить
+                                                </button>
+                                            </form>
+                                        {% endif %}
+
+                                        <!-- Смена роли и удаление пользователя (только администратор) -->
+                                        {% if session.get('role') == 'admin' %}
+                                            <form action="/admin/users/update_role/{{ u['id'] }}" method="POST" class="d-flex align-items-center gap-1">
+                                                <select name="role_id" class="form-select form-select-sm" style="width: auto;">
+                                                    {% for r in roles %}
+                                                        <option value="{{ r['id'] }}" {% if r['role_name'] == u['role_name'] %}selected{% endif %}>
+                                                            {{ r['description'] }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+                                                <button type="submit" class="btn btn-sm btn-outline-primary">Роль</button>
+                                            </form>
+
+                                            {% if u['id'] != session.get('user_id') %}
+                                                <form action="/admin/users/delete/{{ u['id'] }}" method="POST" class="d-inline"
+                                                    onsubmit="return confirm('Удалить этого пользователя? Это действие нельзя отменить.');">
+                                                    <button type="submit" class="btn btn-sm btn-danger" title="Удалить пользователя">
+                                                        🗑️
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
                                 </td>
                                 {% endif %}
                             </tr>
