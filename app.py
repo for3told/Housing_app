@@ -25,54 +25,61 @@ def get_db_connection():
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
+    user_id = session['user_id']
+    user_role = session.get('role')
+
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    # Автоматическое закрытие просроченных голосований
+
+    # Закрываем просроченные голосования, если такие есть
     cursor.execute("""
-        UPDATE polls 
-        SET is_active = FALSE 
-        WHERE is_active = TRUE AND expires_at < CURRENT_TIMESTAMP;
+        UPDATE polls
+        SET is_active = FALSE
+        WHERE is_active = TRUE
+          AND expires_at IS NOT NULL
+          AND expires_at <= CURRENT_TIMESTAMP;
     """)
-    conn.commit()
-    
-    user_role = session.get('role')
-    user_id = session['user_id']
-    polls = []
-    
+
+    # Получаем доступные пользователю голосования
     if user_role in ['admin', 'dispatcher']:
         cursor.execute("""
-            SELECT p.*, b.address as building_address 
-            FROM polls p 
-            JOIN buildings b ON p.building_id = b.id 
+            SELECT p.*, b.address AS building_address
+            FROM polls p
+            JOIN buildings b ON p.building_id = b.id
             ORDER BY p.id DESC;
         """)
-        polls = cursor.fetchall()
     else:
-        # Безопасно проверяем, привязана ли вообще квартира к пользователю
         cursor.execute("""
-            SELECT a.building_id 
-            FROM users u
-            JOIN apartments a ON u.apartment_id = a.id
-            WHERE u.id = %s;
+            SELECT p.*, b.address AS building_address
+            FROM polls p
+            JOIN buildings b ON p.building_id = b.id
+            JOIN apartments a ON a.building_id = b.id
+            JOIN users u ON u.apartment_id = a.id
+            WHERE u.id = %s
+            ORDER BY p.id DESC;
         """, (user_id,))
-        user_building = cursor.fetchone()
-        
-        # Проверяем не просто наличие объекта, а то, что он содержит building_id
-        if user_building and user_building['building_id']:
-            cursor.execute("""
-                SELECT p.*, b.address as building_address 
-                FROM polls p 
-                JOIN buildings b ON p.building_id = b.id 
-                WHERE p.building_id = %s AND p.is_active = TRUE AND p.is_closed = FALSE
-                ORDER BY p.id DESC;
-            """, (user_building['building_id'],))
-            polls = cursor.fetchall()
-            
+    polls = cursor.fetchall()
+
+    # Получаем входящие запросы на привязку к квартире для текущего собственника
+    cursor.execute("""
+        SELECT r.id, r.requester_id, r.target_apartment_id, r.requested_owner_status, r.created_at,
+               u.last_name, u.first_name, u.middle_name,
+               b.address, a.entrance, a.apartment_number
+        FROM address_change_requests r
+        JOIN users u ON r.requester_id = u.id
+        JOIN apartments a ON r.target_apartment_id = a.id
+        JOIN buildings b ON a.building_id = b.id
+        WHERE r.owner_id = %s AND r.status = 'pending'
+        ORDER BY r.created_at DESC;
+    """, (user_id,))
+    address_requests = cursor.fetchall()
+
+    conn.commit()
     cursor.close()
     conn.close()
-    return render_template('index.html', polls=polls)
+
+    return render_template('index.html', polls=polls, address_requests=address_requests)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -816,37 +823,88 @@ def profile():
         action = request.form.get('action')
         
         # 1. Смена адреса / квартиры и статуса собственника
+# 1. Смена адреса / квартиры и статуса собственника
         if action == 'update_address':
-            new_apartment_id = request.form.get('apartment_id')
+            new_apartment_id = request.form.get('apartment_id', type=int)
             is_owner_req = True if request.form.get('is_owner') == 'true' else False
-            
+
             if not new_apartment_id:
                 error = "Выберите корректную квартиру из выпадающего списка."
             else:
-                cursor.execute("SELECT apartment_id FROM users WHERE id = %s;", (user_id,))
-                current_apt = cursor.fetchone()['apartment_id']
-                
-                # Если квартира изменилась, сбрасываем подтверждение владельца
-                if str(current_apt) != str(new_apartment_id):
-                    cursor.execute("""
-                        UPDATE users 
-                        SET apartment_id = %s, is_owner_requested = %s, is_owner_verified = FALSE 
-                        WHERE id = %s;
-                    """, (new_apartment_id, is_owner_req, user_id))
+                cursor.execute("SELECT id FROM apartments WHERE id = %s;", (new_apartment_id,))
+                apt_exists = cursor.fetchone()
+
+                if not apt_exists:
+                    error = "Выбранная квартира не найдена."
                 else:
+                    cursor.execute("SELECT apartment_id FROM users WHERE id = %s;", (user_id,))
+                    current_apt = cursor.fetchone()['apartment_id']
+
+                    # Ищем подтвержденного собственника целевой квартиры (исключая самого пользователя)
                     cursor.execute("""
-                        UPDATE users 
-                        SET is_owner_requested = %s 
-                        WHERE id = %s;
-                    """, (is_owner_req, user_id))
-                
-                cursor.execute("""
-                    INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
-                    VALUES (%s, %s, %s, %s, %s);
-                """, (user_id, session['full_name'], "UPDATE_PROFILE", "Обновлен адрес проживания / статус владельца", request.remote_addr))
-                
-                conn.commit()
-                success = "Данные об адресе успешно обновлены!"
+                        SELECT id, last_name, first_name, middle_name
+                        FROM users
+                        WHERE apartment_id = %s
+                          AND is_owner_verified = TRUE
+                          AND id != %s
+                        ORDER BY id ASC
+                        LIMIT 1;
+                    """, (new_apartment_id, user_id))
+                    verified_owner = cursor.fetchone()
+
+                    if verified_owner and current_apt != new_apartment_id:
+                        # Проверяем, нет ли уже активного ожидающего запроса на эту квартиру от этого пользователя
+                        cursor.execute("""
+                            SELECT id FROM address_change_requests
+                            WHERE requester_id = %s
+                              AND target_apartment_id = %s
+                              AND status = 'pending';
+                        """, (user_id, new_apartment_id))
+                        existing_req = cursor.fetchone()
+
+                        if existing_req:
+                            success = "Запрос на смену адреса уже отправлен собственнику квартиры и ожидает ответа."
+                        else:
+                            cursor.execute("""
+                                INSERT INTO address_change_requests
+                                    (requester_id, owner_id, target_apartment_id, requested_owner_status, status)
+                                VALUES (%s, %s, %s, %s, 'pending');
+                            """, (user_id, verified_owner['id'], new_apartment_id, is_owner_req))
+
+                            cursor.execute("""
+                                INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                                VALUES (%s, %s, %s, %s, %s);
+                            """, (
+                                user_id,
+                                session['full_name'],
+                                "REQUEST_ADDRESS_CHANGE",
+                                f"Запрошена смена адреса на квартиру ID {new_apartment_id} (ожидает подтверждения собственника ID {verified_owner['id']})",
+                                request.remote_addr
+                            ))
+                            conn.commit()
+                            success = "У этой квартиры есть подтверждённый собственник. Запрос отправлен ему — адрес изменится после его подтверждения."
+                    else:
+                        # Собственника нет (или квартира та же) — обновляем адрес напрямую
+                        if current_apt != new_apartment_id:
+                            cursor.execute("""
+                                UPDATE users
+                                SET apartment_id = %s, is_owner_requested = %s, is_owner_verified = FALSE
+                                WHERE id = %s;
+                            """, (new_apartment_id, is_owner_req, user_id))
+                        else:
+                            cursor.execute("""
+                                UPDATE users
+                                SET is_owner_requested = %s
+                                WHERE id = %s;
+                            """, (is_owner_req, user_id))
+
+                        cursor.execute("""
+                            INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+                            VALUES (%s, %s, %s, %s, %s);
+                        """, (user_id, session['full_name'], "UPDATE_PROFILE", "Обновлен адрес проживания / статус владельца", request.remote_addr))
+
+                        conn.commit()
+                        success = "Данные об адресе успешно обновлены!"
                 
         # 2. Смена пароля
         elif action == 'change_password':
@@ -1232,6 +1290,83 @@ def process_owner_request(user_id, decision):
     conn.close()
 
     return redirect(url_for('admin_users'))
-    
+
+@app.route('/address_request/<int:req_id>/<decision>', methods=['POST'])
+def resolve_address_request(req_id, decision):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if decision not in ['approve', 'reject']:
+        return "Некорректное действие", 400
+
+    owner_id = session['user_id']
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cursor.execute("""
+        SELECT r.*, b.address, a.entrance, a.apartment_number
+        FROM address_change_requests r
+        JOIN apartments a ON r.target_apartment_id = a.id
+        JOIN buildings b ON a.building_id = b.id
+        WHERE r.id = %s AND r.owner_id = %s AND r.status = 'pending';
+    """, (req_id, owner_id))
+    req_row = cursor.fetchone()
+
+    if not req_row:
+        cursor.close()
+        conn.close()
+        return "Запрос не найден или уже обработан", 404
+
+    apt_label = f"{req_row['address']}, под. {req_row['entrance']}, кв. {req_row['apartment_number']}"
+
+    if decision == 'approve':
+        # Меняем адрес заявителю на квартиру собственника; статус собственника автоматически не выдаём
+        cursor.execute("""
+            UPDATE users
+            SET apartment_id = %s,
+                is_owner_verified = FALSE,
+                is_owner_requested = %s
+            WHERE id = %s;
+        """, (req_row['target_apartment_id'], bool(req_row['requested_owner_status']), req_row['requester_id']))
+
+        cursor.execute("""
+            UPDATE address_change_requests
+            SET status = 'approved', resolved_at = CURRENT_TIMESTAMP
+            WHERE id = %s;
+        """, (req_id,))
+
+        cursor.execute("""
+            INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (
+            owner_id,
+            session['full_name'],
+            "ADDRESS_REQUEST_APPROVED",
+            f"Собственник одобрил смену адреса пользователя ID {req_row['requester_id']} на ({apt_label})",
+            request.remote_addr
+        ))
+    else:
+        cursor.execute("""
+            UPDATE address_change_requests
+            SET status = 'rejected', resolved_at = CURRENT_TIMESTAMP
+            WHERE id = %s;
+        """, (req_id,))
+
+        cursor.execute("""
+            INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (
+            owner_id,
+            session['full_name'],
+            "ADDRESS_REQUEST_REJECTED",
+            f"Собственник отклонил смену адреса пользователя ID {req_row['requester_id']} на ({apt_label})",
+            request.remote_addr
+        ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('index'))
+
 if __name__ == '__main__':
     app.run(debug=True)
