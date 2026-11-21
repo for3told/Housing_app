@@ -499,6 +499,63 @@ def vote(poll_id):
     
     return render_template('vote.html', poll=poll, options=options, voters=voters, has_voted=has_voted, error=error)
 
+@app.route('/polls/delete/<int:poll_id>', methods=['POST'])
+def delete_poll(poll_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    if session.get('role') not in ['admin', 'dispatcher']:
+        return "Доступ запрещен: удалять голосования могут только администратор и диспетчер.", 403
+
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cursor.execute("""
+        SELECT p.id, p.title, p.is_active, p.is_closed, p.expires_at, b.address
+        FROM polls p
+        LEFT JOIN buildings b ON p.building_id = b.id
+        WHERE p.id = %s;
+    """, (poll_id,))
+    poll = cursor.fetchone()
+
+    if not poll:
+        cursor.close()
+        conn.close()
+        return "Голосование не найдено", 404
+
+    cursor.execute("SELECT CURRENT_TIMESTAMP AS now_ts;")
+    now_ts = cursor.fetchone()['now_ts']
+
+    is_finished = (
+        not poll['is_active']
+        or bool(poll['is_closed'])
+        or (poll['expires_at'] is not None and poll['expires_at'] <= now_ts)
+    )
+
+    if not is_finished:
+        cursor.close()
+        conn.close()
+        return "Удалить можно только завершенное голосование.", 400
+
+    cursor.execute("DELETE FROM polls WHERE id = %s;", (poll_id,))
+
+    cursor.execute("""
+        INSERT INTO audit_logs (user_id, user_name_snapshot, action_type, description, ip_address)
+        VALUES (%s, %s, %s, %s, %s);
+    """, (
+        session['user_id'],
+        session['full_name'],
+        "DELETE_POLL",
+        f"Удалено завершенное голосование «{poll['title']}» (ID {poll_id}, дом: {poll['address'] or 'не указан'})",
+        request.remote_addr
+    ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return redirect(url_for('index'))
+
 # --- УПРАВЛЕНИЕ ЗДАНИЯМИ И АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ КВАРТИР ---
 
 @app.route('/admin/buildings')
